@@ -51,6 +51,62 @@ def check_password():
 if not check_password():
     st.stop()  # Do not run the rest of the app
 
+# --- UTILITIES: SYNCHRONIZED FILTERS ---
+def synchronized_range_filter(label, key_prefix, min_val, max_val, default_val):
+    """Creates a range filter with a slider synchronized with two numeric inputs."""
+    slider_key = f"{key_prefix}_slider"
+    min_input_key = f"{key_prefix}_min_input"
+    max_input_key = f"{key_prefix}_max_input"
+    
+    # Initialize state if not present
+    if slider_key not in st.session_state:
+        st.session_state[slider_key] = default_val
+        st.session_state[min_input_key] = default_val[0]
+        st.session_state[max_input_key] = default_val[1]
+
+    st.markdown(f"#### 🏘️ {label}")
+    
+    # Header with Numeric Inputs
+    c_min, c_max = st.columns(2)
+    
+    # Callback to sync slider from inputs
+    def sync_slider_from_inputs():
+        # Auto-fix: Ensure min <= max
+        v_min = st.session_state[min_input_key]
+        v_max = st.session_state[max_input_key]
+        if v_min > v_max:
+            st.session_state[max_input_key] = v_min
+            v_max = v_min
+        st.session_state[slider_key] = (v_min, v_max)
+
+    # Callback to sync inputs from slider
+    def sync_inputs_from_slider():
+        v_min, v_max = st.session_state[slider_key]
+        st.session_state[min_input_key] = v_min
+        st.session_state[max_input_key] = v_max
+
+    with c_min:
+        st.number_input(
+            "Min", min_value=min_val, max_value=max_val,
+            key=min_input_key, on_change=sync_slider_from_inputs,
+            label_visibility="collapsed"
+        )
+    with c_max:
+        st.number_input(
+            "Max", min_value=min_val, max_value=max_val,
+            key=max_input_key, on_change=sync_slider_from_inputs,
+            label_visibility="collapsed"
+        )
+
+    # Slider
+    st.slider(
+        label, min_value=min_val, max_value=max_val,
+        key=slider_key, on_change=sync_inputs_from_slider,
+        label_visibility="collapsed"
+    )
+    
+    return st.session_state[slider_key]
+
 # --- SESSION STATE MANAGEMENT ---
 if 'theme' not in st.session_state:
     st.session_state['theme'] = 'Dark' # Initial fallback
@@ -231,10 +287,9 @@ if st.session_state['current_step'] == 1:
 
     with col2:
         with st.container(border=True):
-            st.markdown("#### 🏘️ Taille & Cible")
-            selected_lots = st.slider(
+            selected_lots = synchronized_range_filter(
                 "Nombre de lots (Habitation)",
-                min_value=0, max_value=1000, value=(20, 500)
+                "lots_filter", 0, 1000, (20, 500)
             )
             c_opt1, c_opt2 = st.columns(2)
             with c_opt1:
