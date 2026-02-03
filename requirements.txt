@@ -1,0 +1,8 @@
+streamlit>=1.30.0
+pandas
+pydeck
+google-cloud-bigquery
+db-dtypes
+duckduckgo-search
+rapidfuzz
+requests

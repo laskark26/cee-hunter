@@ -1,0 +1,20 @@
+# Streamlit
+.streamlit/
+! .streamlit/config.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# OS
+.DS_Store
+
+# Project specific
+gen-lang-client-*.json
+temp_*.py
