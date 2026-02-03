@@ -11,6 +11,37 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+# --- SECURITY: LOGIN ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets.get("APP_PASSWORD", "antigravity2026"):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show input for password.
+        st.text_input(
+            "Mot de passe requis", type="password", on_change=password_entered, key="password"
+        )
+        st.info("💡 L'accès à cet outil est restreint.")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password incorrect, show input + error.
+        st.text_input(
+            "Mot de passe requis", type="password", on_change=password_entered, key="password"
+        )
+        st.error("😕 Mot de passe incorrect")
+        return False
+    else:
+        # Password correct.
+        return True
+
+if not check_password():
+    st.stop()  # Do not run the rest of the app
 
 # --- SESSION STATE MANAGEMENT ---
 if 'theme' not in st.session_state:
