@@ -180,7 +180,7 @@ st.markdown(f"""
         .stApp {{ background-color: {c['bg_color']}; color: {c['text_color']}; }}
         
         /* 60% Reduction in Vertical Spacing */
-        .block-container {{ padding-top: 0.5rem !important; padding-bottom: 0rem !important; max-width: 1200px !important; }}
+        .block-container {{ padding-top: 60px !important; padding-bottom: 0rem !important; max-width: 1200px !important; }}
         [data-testid="stVerticalBlock"] {{ gap: 0.25rem !important; }}
         
         /* Compact Header */
