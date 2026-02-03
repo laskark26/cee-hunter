@@ -47,10 +47,17 @@ The app uses Streamlit's `secrets.toml` (located in `.streamlit/`) for:
 -   `PAPPERS_API_KEY`
 -   `GOOGLE_SERVICE_ACCOUNT_JSON` (BigQuery access)
 
+### 🎨 UI & UX Features (v1 Pro)
+
+- **Full-Width SaaS Workspace**: Layout optimized for large screens, removing the sidebar for maximum focus.
+- **Smart Theme Engine**: Automatic detection of system theme (Dark/Light) with manual override in the header.
+- **Precise Range Filters**: Synchronized slider + numeric inputs for professional-grade data filtering.
+- **High-Density Logic**: Compressed padding and micro-stepper to minimize scrolling on laptop screens.
+
 ### 🚀 Running the App
 
 ```bash
-python3 -m streamlit run app.py
+python3 -m streamlit run streamlit_app.py
 ```
 
 ---
