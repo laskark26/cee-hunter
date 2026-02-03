@@ -46,12 +46,19 @@ if not check_password():
 # --- SESSION STATE MANAGEMENT ---
 if 'theme' not in st.session_state:
     st.session_state['theme'] = 'Dark'
+if 'current_step' not in st.session_state:
+    st.session_state['current_step'] = 1
 if 'syndic_list' not in st.session_state:
     st.session_state['syndic_list'] = pd.DataFrame()
 if 'selected_syndic_data' not in st.session_state:
     st.session_state['selected_syndic_data'] = pd.DataFrame()
 if 'current_syndic_name' not in st.session_state:
     st.session_state['current_syndic_name'] = None
+
+# --- NAVIGATION HELPERS ---
+def go_to_step(step_number):
+    st.session_state['current_step'] = step_number
+    st.rerun()
 
 # --- THEME SELECTOR ---
 st.sidebar.markdown("## 🎨 Apparence")
@@ -70,7 +77,8 @@ theme_config = {
         "text_color": "#F3F4F6",
         "sub_text": "#9CA3AF",
         "sep_color": "#262730",
-        "btn_text": "#FFFFFF"
+        "btn_text": "#FFFFFF",
+        "accent": "#10B981"
     },
     "Light": {
         "bg_color": "#F8FAFC",
@@ -80,7 +88,8 @@ theme_config = {
         "text_color": "#1E293B",
         "sub_text": "#64748B",
         "sep_color": "#E2E8F0",
-        "btn_text": "#1E293B"
+        "btn_text": "#1E293B",
+        "accent": "#059669"
     }
 }
 
@@ -88,295 +97,327 @@ c = theme_config[st.session_state['theme']]
 
 st.markdown(f"""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
         html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
         .stApp {{ background-color: {c['bg_color']}; color: {c['text_color']}; }}
         [data-testid="stSidebar"] {{ background-color: {c['sidebar_bg']}; border-right: 1px solid {c['sep_color']}; }}
+        
+        /* Premium Card Style */
+        .premium-card {{
+            background-color: {c['card_bg']};
+            padding: 2rem;
+            border-radius: 16px;
+            border: 1px solid {c['card_border']};
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1.5rem;
+        }}
+        
+        /* Metric Styling */
         [data-testid="stMetric"] {{ background-color: {c['card_bg']}; padding: 15px 20px; border-radius: 12px; border: 1px solid {c['card_border']}; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
         [data-testid="stMetricLabel"] {{ color: {c['sub_text']}; font-size: 0.9rem; }}
         [data-testid="stMetricValue"] {{ color: {c['text_color']}; font-weight: 600; }}
-        h1, h2, h3, h4, h5, h6 {{ color: {c['text_color']}; font-weight: 600; }}
+        
+        h1, h2, h3, h4, h5, h6 {{ color: {c['text_color']}; font-weight: 800; tracking: -0.025em; }}
         .stMarkdown {{ color: {c['text_color']}; }}
-        div.stButton > button {{ width: 100%; border-radius: 6px; font-weight: 600; padding: 0.5rem 1rem; }}
-        /* Dataframe styling adjustment for theme */
-        [data-testid="stDataFrame"] {{ border: 1px solid {c['card_border']}; border-radius: 8px; }}
+        
+        /* Stepper UI */
+        .step-indicator {{
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }}
+        .step-item {{
+            text-align: center;
+            flex: 1;
+            position: relative;
+        }}
+        .step-number {{
+            width: 32px;
+            height: 32px;
+            line-height: 32px;
+            border-radius: 50%;
+            background: {c['card_border']};
+            color: {c['sub_text']};
+            display: inline-block;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }}
+        .step-active .step-number {{
+            background: {c['accent']};
+            color: white;
+        }}
+        .step-label {{
+            font-size: 0.8rem;
+            color: {c['sub_text']};
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+        }}
+        .step-active .step-label {{
+            color: {c['text_color']};
+        }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- HEADER ---
-col_logo, col_title = st.columns([1, 6])
-with col_title:
-    st.title("🎯 CEE Hunter v1")
-    st.markdown("POWERED BY **ANTIGRAVITY** | *Lead Generation Intelligence*")
-st.markdown("---")
+# --- ONBOARDING BANNER ---
+st.container().markdown(f"""
+    <div style="text-align: center; padding: 2rem 0;">
+        <h1 style="font-size: 3rem; margin-bottom: 0.5rem;">🎯 CEE Hunter</h1>
+        <p style="color: {c['sub_text']}; font-size: 1.2rem; max-width: 800px; margin: 0 auto;">
+            Trouvez les meilleurs syndics à contacter pour des projets de rénovation CEE en 4 étapes simples.
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
-# --- STEP 1: GLOBAL FILTERS (SIDEBAR) ---
-st.sidebar.markdown("## 1. Critères de Recherche")
+# --- PROGRESS STEPPER ---
+steps = ["Critères", "Résultats", "Intelligence", "Prospecter"]
+step_cols = st.columns(len(steps))
+st.markdown('<div class="step-indicator">', unsafe_allow_html=True)
+cols = st.columns(len(steps))
+for i, label in enumerate(steps):
+    is_active = st.session_state['current_step'] >= (i + 1)
+    status_class = "step-active" if is_active else ""
+    with cols[i]:
+        st.markdown(f"""
+            <div class="step-item {status_class}">
+                <div class="step-number">{i+1}</div>
+                <div class="step-label">{label}</div>
+            </div>
+        """, unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True)
 
-# Climate Zone
-selected_zones = st.sidebar.multiselect(
-    "🌍 Zone Climatique",
-    options=["H1", "H2", "H3"],
-    default=["H1"]
-)
+# --- STEP 1: GUIDED CRITERIA ---
+if st.session_state['current_step'] == 1:
+    st.markdown("### 🥇 Étape 1 : Quels types d'immeubles cherchez-vous ?")
+    
+    with st.container(border=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🌍 Zone Climatique")
+            st.caption("Les zones H1 sont les plus froides et génèrent souvent plus de certificats CEE.")
+            selected_zones = st.multiselect(
+                "Sélectionnez les zones",
+                options=["H1", "H2", "H3"],
+                default=["H1"],
+                label_visibility="collapsed"
+            )
+            
+            st.markdown("#### 🏗️ Période de construction")
+            st.caption("Les bâtiments construits avant 1975 sont les cibles prioritaires.")
+            selected_periods = st.multiselect(
+                "Sélectionnez les périodes",
+                options=['Avant 1949', '1949-1974', '1975-1993', '1994-2000', '2001-2010', 'Après 2011'],
+                default=['Avant 1949', '1949-1974'],
+                label_visibility="collapsed"
+            )
 
-# Habitation Lots
-selected_lots = st.sidebar.slider(
-    "🏘️ Lots d'habitation (Min/Max)",
-    min_value=0,
-    max_value=1000,
-    value=(20, 500)
-)
+        with col2:
+            st.markdown("#### 🏘️ Taille de la copropriété")
+            st.caption("Nombre de lots d'habitation. Les copros de 20 à 200 lots sont idéales.")
+            selected_lots = st.slider(
+                "Nombre de lots",
+                min_value=0,
+                max_value=1000,
+                value=(20, 500),
+                label_visibility="collapsed"
+            )
+            
+            st.markdown("#### 🏠 Options avancées")
+            exclude_big = st.checkbox("🚫 Exclure les géants (Foncia, Nexity, etc.)", value=True)
+            qpv_only = st.checkbox("📍 Uniquement Quartiers Prioritaires (QPV)", value=False)
 
-# Construction Period
-selected_periods = st.sidebar.multiselect(
-    "🏗️ Période de construction",
-    options=['Avant 1949', '1949-1974', '1975-1993', '1994-2000', '2001-2010', 'Après 2011'],
-    default=['Avant 1949', '1949-1974', '1975-1993', '1994-2000', '2001-2010', 'Après 2011']
-)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    if st.button("🚀 Trouver les meilleurs syndics", type="primary", use_container_width=True):
+        with st.spinner("Analyse du gisement en cours..."):
+            st.session_state['syndic_list'] = fetch_aggregated_syndics(
+                climate_zones=selected_zones,
+                min_lots=selected_lots[0],
+                max_lots=selected_lots[1],
+                periods=selected_periods,
+                exclude_big_syndics=exclude_big,
+                qpv_only=qpv_only
+            )
+            # Store filters for reuse in step 2
+            st.session_state['filters'] = {
+                'zones': selected_zones,
+                'lots': selected_lots,
+                'periods': selected_periods,
+                'exclude_big': exclude_big,
+                'qpv': qpv_only
+            }
+            go_to_step(2)
+# --- STEP 2: RESULTS TABLE ---
+elif st.session_state['current_step'] == 2:
+    st.markdown("### 🥈 Étape 2 : Voici les syndics correspondants")
+    st.caption("Sélectionnez un syndic pour lancer l'enrichissement et voir les contacts.")
+    
+    if st.button("⬅️ Modifier les critères", key="back_to_1"):
+        go_to_step(1)
 
-# Exclusions
-exclude_big = st.sidebar.checkbox("🚫 Exclure Gros Syndics & Non-Valides", value=True, help="Exclut Foncia, Lamy, Nexity, Citya, et les données 'Non partagées'.")
-
-# QPV Filter
-qpv_filter = st.sidebar.checkbox("🏠 Uniquement QPV", value=False, help="Ne montrer que les copropriétés en Quartier Prioritaire de la Ville.")
-
-st.sidebar.markdown("---")
-
-
-# --- STEP 2: SEARCH & AGGREGATE ---
-st.sidebar.markdown("## 2. Lancer la Recherche")
-if st.sidebar.button("🔍 Rechercher les Syndics", type="primary"):
-    with st.spinner("Analyse de la base BigQuery (600k+ lignes)..."):
-        st.session_state['syndic_list'] = fetch_aggregated_syndics(
-            climate_zones=selected_zones,
-            min_lots=selected_lots[0],
-            max_lots=selected_lots[1],
-            periods=selected_periods,
-            exclude_big_syndics=exclude_big,
-            qpv_only=qpv_filter
-        )
-        # Reset detail view on new search
-        st.session_state['selected_syndic_data'] = pd.DataFrame()
-        st.session_state['current_syndic_name'] = None
-
-# Display Aggregated Results
-if not st.session_state['syndic_list'].empty:
     df_agg = st.session_state['syndic_list']
     
-    # KPIs Global to Selection
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Syndics Trouvés", f"{len(df_agg):,}".replace(",", " "))
-    with col2:
-        st.metric("Total Copropriétés", f"{df_agg['nb_copros'].sum():,}".replace(",", " "))
-    with col3:
-        st.metric("Total Lots (Est.)", f"{df_agg['total_lots'].sum():,}".replace(",", " "))
-
-    st.markdown("### 🏆 Top Syndics Correspondants")
-    st.info("Sélectionnez un syndic ci-dessous pour voir le détail et la carte.")
-    
-    # Renaming for display
-    df_display = df_agg[[
-        "Syndic", "Siret", "nb_copros", "total_lots"
-    ]].rename(columns={
-        "nb_copros": "Copropriétés", 
-        "total_lots": "Total Lots"
-    })
-
-    # Interactive Table with Selection
-    event = st.dataframe(
-        df_display,
-        use_container_width=True,
-        column_config={
-            "Syndic": st.column_config.TextColumn("Syndic Principal", width="medium"),
-            "Siret": st.column_config.TextColumn("SIRET", width="small"),
-            "Copropriétés": st.column_config.NumberColumn("NB Copros", format="%d"),
-            "Total Lots": st.column_config.ProgressColumn("Volume Lots", format="%d", min_value=0, max_value=int(df_agg['total_lots'].max())),
-        },
-        selection_mode="single-row",
-        on_select="rerun",  
-        hide_index=True,
-        height=400
-    )
-    
-    # --- STEP 3: DRILL DOWN (DETAIL) ---
-    if len(event.selection['rows']) > 0:
-        selected_index = event.selection['rows'][0]
-        syndic_row = df_agg.iloc[selected_index]
-        syndic_name = syndic_row['Syndic']
-        syndic_siret = syndic_row['Siret']
+    if df_agg.empty:
+        st.warning("⚠️ Aucun résultat trouvé. Essayez d'élargir vos critères (ex: inclure plus de périodes de construction).")
+    else:
+        # Mini KPIs
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Syndics", f"{len(df_agg)}")
+        k2.metric("Copropriétés", f"{int(df_agg['nb_copros'].sum())}")
+        k3.metric("Total Lots", f"{int(df_agg['total_lots'].sum())}")
         
-        # Pappers Enrichment for the SELECTED syndic ONLY
-        from core.pappers_connector import get_syndic_info
-        with st.spinner(f"Enrichissement Pappers pour {syndic_name}..."):
-            pappers_info = get_syndic_info(syndic_siret)
+        # Table configuration
+        df_display = df_agg[[
+            "Syndic", "Siret", "nb_copros", "total_lots"
+        ]].rename(columns={
+            "nb_copros": "Copropriétés", 
+            "total_lots": "Volume Lots"
+        })
 
-        # Fetch details if not already loaded for this syndic
-        if st.session_state['current_syndic_name'] != syndic_name:
-            with st.spinner(f"Chargement des copropriétés pour {syndic_name}..."):
-                st.session_state['selected_syndic_data'] = fetch_data_by_syndic(
-                    syndic_name, 
-                    selected_zones, 
-                    selected_lots[0], 
-                    selected_lots[1],
-                    periods=selected_periods,
-                    exclude_big_syndics=exclude_big,
-                    qpv_only=qpv_filter
-                )
-                st.session_state['current_syndic_name'] = syndic_name
+        event = st.dataframe(
+            df_display,
+            use_container_width=True,
+            column_config={
+                "Syndic": st.column_config.TextColumn("📋 Nom du Syndic", width="large"),
+                "Siret": st.column_config.TextColumn("SIRET", width="small"),
+                "Copropriétés": st.column_config.NumberColumn("🏢 Immeubles", format="%d"),
+                "Volume Lots": st.column_config.ProgressColumn("🏠 Lots Totaux", format="%d", min_value=0, max_value=int(df_agg['total_lots'].max())),
+            },
+            selection_mode="single-row",
+            on_select="rerun",  
+            hide_index=True,
+            height=500
+        )
         
-        # Display Detail View
-        detail_data = st.session_state['selected_syndic_data']
+        if len(event.selection['rows']) > 0:
+            selected_index = event.selection['rows'][0]
+            selected_row = df_agg.iloc[selected_index]
+            st.session_state['selected_syndic_row'] = selected_row
+            go_to_step(3)
 
-        if not detail_data.empty:
-            st.markdown("---")
-            st.header(f"🏢 Détail : {syndic_name}")
-            
-            # Pappers Info Header
-            if pappers_info:
-                with st.expander("📊 Informations Légales & Contact Pappers", expanded=True):
-                    # Top Row: Dirigeant, CA, Siret
-                    c1, c2, c3 = st.columns(3)
-                    with c1:
-                        dirigeant = f"{pappers_info.get('prenom_dirigeant', '')} {pappers_info.get('nom_dirigeant', '')}".strip()
-                        st.subheader("👤 Dirigeant")
-                        st.write(f"{dirigeant or 'Non renseigné'}")
-                    with c2:
-                        ca = pappers_info.get('ca_annuel', 0)
-                        ca_str = f"{ca/1000000:.1f} M€" if ca and ca > 0 else "N/A"
-                        st.subheader("💰 Chiffre d'Affaires")
-                        st.write(f"{ca_str}")
-                    with c3:
-                        st.subheader("🔢 SIRET")
-                        st.write(f"`{syndic_siret}`")
-                    
-                    st.divider()
-                    
-                    # Bottom Row: Contact Info
-                    c4, c5, c6 = st.columns(3)
-                    with c4:
-                        site = pappers_info.get('sites_internet', '')
-                        st.write(f"**🌐 Site :** {site or 'N/A'}")
-                    with c5:
-                        tel = pappers_info.get('telephone', '')
-                        st.write(f"**📞 Tel :** {tel or 'N/A'}")
-                    with c6:
-                        email = pappers_info.get('email', '')
-                        st.write(f"**📧 Email :** {email or 'N/A'}")
-                    
-                    # Additional: LinkedIn & Category
-                    c7, c8 = st.columns(2)
-                    with c7:
-                        linkedin = pappers_info.get('lien_linkedin', '')
-                        st.write(f"**🔗 LinkedIn :** {linkedin or 'N/A'}")
-                    with c8:
-                        cat = pappers_info.get('categorie_entreprise', '')
-                        st.write(f"**📂 Catégorie :** {cat or 'N/A'}")
+# --- STEP 3: SYNDIC DETAILS ---
+elif st.session_state['current_step'] == 3:
+    syndic_row = st.session_state.get('selected_syndic_row')
+    if syndic_row is None:
+        go_to_step(2)
+        
+    syndic_name = syndic_row['Syndic']
+    syndic_siret = syndic_row['Siret']
+    
+    col_back, col_title_detail = st.columns([1, 5])
+    with col_back:
+        if st.button("⬅️ Retour", key="back_to_2"):
+            go_to_step(2)
+    with col_title_detail:
+        st.markdown(f"### 🥉 Étape 3 : Intelligence sur {syndic_name}")
 
-            st.markdown("---")
+    # Pappers Enrichment
+    from core.pappers_connector import get_syndic_info
+    with st.spinner(f"Récupération des données légales pour {syndic_name}..."):
+        pappers_info = get_syndic_info(syndic_siret)
+
+    # Fetch buildings details if needed
+    filters = st.session_state.get('filters', {})
+    if st.session_state['current_syndic_name'] != syndic_name:
+        with st.spinner(f"Chargement du parc immobilier..."):
+            st.session_state['selected_syndic_data'] = fetch_data_by_syndic(
+                syndic_name, 
+                filters.get('zones', ['H1']), 
+                filters.get('lots', (0, 1000))[0], 
+                filters.get('lots', (0, 1000))[1],
+                periods=filters.get('periods'),
+                exclude_big_syndics=filters.get('exclude_big', True),
+                qpv_only=filters.get('qpv', False)
+            )
+            st.session_state['current_syndic_name'] = syndic_name
+        
+    # --- PREMIUM CARDS LAYOUT ---
+    tab_overview, tab_buildings = st.tabs(["📊 Intelligence & Contacts", "🏢 Parc Immobilier"])
+    
+    with tab_overview:
+        col_legal, col_sales = st.columns(2)
+        
+        with col_legal:
+            st.markdown(f"""
+                <div class="premium-card">
+                    <h4>🏢 Informations Légales</h4>
+                    <p style="color: {c['sub_text']}; font-size: 0.9rem;">Données Pappers.fr</p>
+                    <hr style="margin: 1rem 0; border-color: {c['sep_color']};">
+                    <p><b>Dirigeant :</b> {pappers_info.get('prenom_dirigeant', '')} {pappers_info.get('nom_dirigeant', '')}</p>
+                    <p><b>CA Annuel :</b> {f"{pappers_info.get('ca_annuel', 0)/1000000:.1f} M€" if pappers_info.get('ca_annuel') else 'N/A'}</p>
+                    <p><b>SIRET :</b> {syndic_siret}</p>
+                    <p><b>Catégorie :</b> {pappers_info.get('categorie_entreprise', 'N/A')}</p>
+                </div>
+            """, unsafe_allow_html=True)
             
-            # --- ENRICHISSEMENT APOLLO ---
+            with st.container(border=True):
+                st.markdown("#### 🌍 Présence Web")
+                st.write(f"**🌐 Site :** {pappers_info.get('sites_internet', 'N/A')}")
+                st.write(f"**📞 Tel :** {pappers_info.get('telephone', 'N/A')}")
+                st.write(f"**📧 Email :** {pappers_info.get('email', 'N/A')}")
+
+        with col_sales:
             from core.enrichment_manager import EnrichmentManager
             import json
-            
             enricher = EnrichmentManager()
-            
-            # Add state key for enrichment data to persist across reruns
             enrich_key = f"enrich_data_{syndic_siret}"
             
-            # Check for existing data in session or cache
+            # Check for existing data
             if enrich_key not in st.session_state:
                 cached_enrich = enricher.get_cached_data(syndic_siret)
                 if cached_enrich:
                     st.session_state[enrich_key] = cached_enrich
             
-            st.markdown("### 🕵️‍♂️ Intelligence & Prospection (Apollo.io)")
-            
-            col_enrich_btn, col_enrich_status = st.columns([1, 2])
-            
             data_enrich = st.session_state.get(enrich_key)
             
-            with col_enrich_btn:
-                if st.button("🚀 Lancer l'Enrichissement", key=f"btn_enrich_{syndic_siret}"):
-                    with st.spinner("Recherche Web & Apollo en cours..."):
-                        # We use the city from Pappers Address if available (Adresse de reference) from the first row of detail data
-                        city_ref = detail_data.iloc[0]['commune'] if not detail_data.empty else ""
-                        
+            st.markdown(f"""
+                <div class="premium-card" style="border-left-color: {c['accent']};">
+                    <h4 style="color: {c['accent']};">🕵️ Intelligence Apollo.io</h4>
+                    <p style="color: {c['sub_text']}; font-size: 0.9rem;">Détection de décideurs & Emails</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            if not data_enrich:
+                if st.button("🚀 Lancer l'Intelligence Artificielle", type="primary", use_container_width=True):
+                    with st.spinner("Recherche des décideurs..."):
+                        city_ref = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
                         fresh_data = enricher.enrich_syndic(syndic_siret, syndic_name, city_ref, pappers_data=pappers_info)
                         if fresh_data:
                             st.session_state[enrich_key] = fresh_data
-                            st.success("Enrichissement terminé !")
                             st.rerun()
-                        else:
-                            st.error("Aucune correspondance trouvée.")
-
-            # Display Results if available
-            if data_enrich:
-                # 1. Domain Validation
+            else:
                 domain = data_enrich.get('domain')
                 score = data_enrich.get('confidence_score', 0)
-                
                 if domain:
-                    st.markdown(f"**✅ Site Web Validé :** [{domain}](https://{domain}) *(Confiance: {int(score)}%)*")
+                    st.success(f"Domaine validé : **{domain}** ({int(score)}%)")
                 else:
                     st.warning("Domaine non identifié avec certitude.")
-
-                # 2. Key Contacts
-                contacts = data_enrich.get('contacts_json')
-                # Handle stringified json from BQ
+                
+                contacts = data_enrich.get('contacts_json', [])
                 if isinstance(contacts, str):
-                    try:
-                        contacts = json.loads(contacts)
-                    except:
-                        contacts = []
+                    try: contacts = json.loads(contacts)
+                    except: contacts = []
                 
                 if contacts:
                     st.info(f"{len(contacts)} contact(s) clé(s) identifié(s)")
-                    
-                    for idx, ct in enumerate(contacts):
+                    for idx, ct in enumerate(contacts[:3]): # Show top 3
                         with st.container(border=True):
-                            c_av, c_info, c_action = st.columns([1, 4, 3]) # Slightly wider action col
-                            with c_av:
-                                if ct.get('photo_url'):
-                                    st.image(ct.get('photo_url'), width=50)
-                                else:
-                                    st.write("👤")
-                            
-                            with c_info:
-                                name_ct = f"{ct.get('first_name', '')} {ct.get('last_name', '')}"
-                                st.markdown(f"**{name_ct}**")
-                                st.caption(f"{ct.get('title') or 'Poste inconnu'}")
-                                if ct.get('email'):
-                                    st.write(f"📧 `{ct.get('email')}`")
-                                if ct.get('linkedin_url'):
-                                    st.markdown(f"[LinkedIn]({ct.get('linkedin_url')})")
-
-                            with c_action:
-                                # Use index to ensure unique key even if email is missing or duplicate
-                                btn_id = f"ice_{syndic_siret}_{idx}"
-                                if st.button("🧊 Icebreaker", key=btn_id):
-                                    # Simple Logic for now
-                                    first_name = ct.get('first_name', 'Bonjour')
-                                    syndic_short = syndic_name.split(' ')[0].title()
-                                    
-                                    msg = f"""
-                                    **Objet : Synergie avec {syndic_short}**
-                                    
-                                    Bonjour {first_name},
-                                    
-                                    Je vois que vous gérez un parc important de copropriétés en zone H1.
-                                    
-                                    En tant que partenaire CEE, nous accompagnons {syndic_short} sur la valorisation des travaux...
-                                    """
-                                    st.text_area("Email généré", value=msg, height=200)
-
+                            st.markdown(f"**{ct.get('first_name')} {ct.get('last_name')}**")
+                            st.caption(ct.get('title') or "Decision Maker")
+                            if ct.get('email'): st.code(ct.get('email'))
+                            if st.button(f"Sélectionner {ct.get('first_name')}", key=f"sel_{idx}"):
+                                st.session_state['selected_contact'] = ct
+                                go_to_step(4)
                 else:
                     st.write("Aucun contact pertinent trouvé via Apollo.")
-            
-            st.markdown("---")
 
-            # Expanded Columns for Detail View
+    with tab_buildings:
+        st.markdown(f"#### 🏢 Parc immobilier géré par {syndic_name}")
+        if not st.session_state['selected_syndic_data'].empty:
             display_cols = [
                 'nom_d_usage_de_la_copropriete', 
                 'adresse_de_reference', 
@@ -388,9 +429,8 @@ if not st.session_state['syndic_list'].empty:
                 'climate_zone',
                 'in_qpv'
             ]
-            
             st.dataframe(
-                detail_data[display_cols],
+                st.session_state['selected_syndic_data'][display_cols],
                 use_container_width=True,
                 column_config={
                     "nom_d_usage_de_la_copropriete": st.column_config.TextColumn("Copropriété", width="large"),
@@ -408,6 +448,58 @@ if not st.session_state['syndic_list'].empty:
             )
         else:
             st.warning("Aucune géolocalisation disponible pour ce syndic.")
-            
+
+# --- STEP 4: PROSPECTING PACK ---
+elif st.session_state['current_step'] == 4:
+    st.markdown("### 🏅 Étape 4 : Votre Pack de Prospection")
+    
+    if st.button("⬅️ Retour aux contacts", key="back_to_3"):
+        go_to_step(3)
+        
+    contact = st.session_state.get('selected_contact', {})
+    syndic_row = st.session_state.get('selected_syndic_row', {})
+    
+    col_left, col_right = st.columns([2, 1])
+    
+    with col_left:
+        st.markdown(f"""
+            <div class="premium-card">
+                <h4>✉️ Icebreaker Personnalisé</h4>
+                <p style="color: {c['sub_text']};">Copiable pour votre CRM ou Outlook</p>
+                <hr style="margin: 1rem 0; border-color: {c['sep_color']};">
+            </div>
+        """, unsafe_allow_html=True)
+        
+        first_name = contact.get('first_name', 'Bonjour')
+        syndic_name = syndic_row.get('Syndic', 'votre cabinet')
+        
+        icebreaker = f"""Objet : Valorisation des travaux de rénovation énergétique - {syndic_name}
+
+Bonjour {first_name},
+
+Je vous contacte car vous gérez un parc immobilier significatif dans la région, notamment des bâtiments construits avant 1975 qui présentent un fort potentiel pour les certificats d'économie d'énergie (CEE).
+
+Nous avons identifié plusieurs de vos copropriétés qui pourraient bénéficier de subventions majeures. Seriez-vous disponible pour un court échange sur la manière dont nous pouvons valoriser ces dossiers pour vos copropriétaires ?
+
+Bien cordialement,"""
+        
+        st.text_area("Template d'email", value=icebreaker, height=300)
+        if st.button("📋 Copier tout le pack"):
+            st.toast("Copié dans le presse-papier !")
+
+    with col_right:
+        st.markdown("#### 📦 Résumé du pack")
+        with st.container(border=True):
+            st.write(f"**Destinataire :** {contact.get('first_name')} {contact.get('last_name')}")
+            st.write(f"**Email :** `{contact.get('email')}`")
+            st.write(f"**Cabinet :** {syndic_name}")
+            st.divider()
+            st.metric("Immeubles cibles", int(syndic_row.get('nb_copros', 0)))
+            st.metric("Lots impactés", int(syndic_row.get('total_lots', 0)))
+
+    if st.button("🔄 Nouvelle recherche", use_container_width=True):
+        import pandas as pd # Ensure pandas is imported for DataFrame
+        st.session_state['syndic_list'] = pd.DataFrame()
+        go_to_step(1)
 else:
     st.info("👈 Configurez les filtres à gauche et cliquez sur 'Rechercher' pour commencer.")
