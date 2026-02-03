@@ -9,8 +9,16 @@ st.set_page_config(
     page_title="CEE Hunter v1 - Prospecting Dashboard",
     page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
+
+# --- CSS TO HIDE SIDEBAR COMPLETELY ---
+st.markdown("""
+<style>
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+</style>
+""", unsafe_allow_html=True)
 # --- SECURITY: LOGIN ---
 def check_password():
     """Returns `True` if the user had the correct password."""
@@ -45,7 +53,9 @@ if not check_password():
 
 # --- SESSION STATE MANAGEMENT ---
 if 'theme' not in st.session_state:
-    st.session_state['theme'] = 'Dark'
+    st.session_state['theme'] = 'Dark' # Initial fallback
+if 'theme_manually_set' not in st.session_state:
+    st.session_state['theme_manually_set'] = False
 if 'current_step' not in st.session_state:
     st.session_state['current_step'] = 1
 if 'syndic_list' not in st.session_state:
@@ -55,29 +65,41 @@ if 'selected_syndic_data' not in st.session_state:
 if 'current_syndic_name' not in st.session_state:
     st.session_state['current_syndic_name'] = None
 
+# --- SYSTEM THEME DETECTION (One-time) ---
+if not st.session_state.get('theme_manually_set') and not st.session_state.get('system_theme_detected'):
+    from streamlit.components.v1 import html
+    html("""
+    <script>
+        const theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Dark' : 'Light';
+        const url = new URL(window.parent.location.href);
+        if (url.searchParams.get('sys_theme') !== theme) {
+            url.searchParams.set('sys_theme', theme);
+            window.parent.location.href = url.href;
+        }
+    </script>
+    """, height=0)
+    
+    detected = st.query_params.get('sys_theme')
+    if detected:
+        st.session_state['theme'] = detected
+        st.session_state['system_theme_detected'] = True
+        st.rerun()
+
 # --- NAVIGATION HELPERS ---
 def go_to_step(step_number):
     st.session_state['current_step'] = step_number
-    st.rerun()
-
-# --- THEME SELECTOR ---
-st.sidebar.markdown("## 🎨 Apparence")
-theme = st.sidebar.radio("Choisir le thème", ["Dark", "Light"], index=0 if st.session_state['theme'] == 'Dark' else 1, label_visibility="collapsed")
-if theme != st.session_state['theme']:
-    st.session_state['theme'] = theme
     st.rerun()
 
 # --- PREMIUM CSS STYLING ---
 theme_config = {
     "Dark": {
         "bg_color": "#0E1117",
-        "sidebar_bg": "#161B22",
+        "sidebar_bg": "#161B22", # Still used for stepper bg
         "card_bg": "#1E232F",
         "card_border": "#2D333F",
         "text_color": "#F3F4F6",
         "sub_text": "#9CA3AF",
         "sep_color": "#262730",
-        "btn_text": "#FFFFFF",
         "accent": "#10B981"
     },
     "Light": {
@@ -88,7 +110,6 @@ theme_config = {
         "text_color": "#1E293B",
         "sub_text": "#64748B",
         "sep_color": "#E2E8F0",
-        "btn_text": "#1E293B",
         "accent": "#059669"
     }
 }
@@ -103,20 +124,31 @@ st.markdown(f"""
         .stApp {{ background-color: {c['bg_color']}; color: {c['text_color']}; }}
         
         /* 60% Reduction in Vertical Spacing */
-        .block-container {{ padding-top: 1rem !important; padding-bottom: 0rem !important; }}
+        .block-container {{ padding-top: 0.5rem !important; padding-bottom: 0rem !important; max-width: 1200px !important; }}
         [data-testid="stVerticalBlock"] {{ gap: 0.25rem !important; }}
         
         /* Compact Header */
         .header-compact {{
             display: flex;
             align-items: center;
-            justify-content: space-between;
             padding-bottom: 0.5rem;
             border-bottom: 1px solid {c['sep_color']};
             margin-bottom: 0.5rem;
         }}
-        .header-logo {{ font-size: 1.2rem; font-weight: 800; color: {c['accent']}; }}
-        .header-title {{ font-size: 0.9rem; color: {c['sub_text']}; font-weight: 400; }}
+        .header-logo {{ font-size: 1.1rem; font-weight: 800; color: {c['accent']}; margin-right: 1rem; }}
+        .header-title {{ font-size: 0.85rem; color: {c['sub_text']}; font-weight: 400; flex-grow: 1; }}
+
+        /* Theme Toggle Button Styling */
+        .stButton>button[kind="secondary"] {{
+            background: transparent;
+            border: none;
+            font-size: 1.2rem;
+            padding: 0;
+            margin: 0;
+            min-height: auto;
+            width: 32px;
+            height: 32px;
+        }}
 
         /* Micro Stepper */
         .micro-stepper {{
@@ -124,43 +156,47 @@ st.markdown(f"""
             gap: 1.5rem;
             justify-content: center;
             background: {c['sidebar_bg']};
-            padding: 8px 16px;
+            padding: 6px 16px;
             border-radius: 8px;
             border: 1px solid {c['card_border']};
-            margin-bottom: 1rem;
+            margin-bottom: 0.75rem;
         }}
-        .step-pill {{ font-size: 0.75rem; color: {c['sub_text']}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }}
+        .step-pill {{ font-size: 0.7rem; color: {c['sub_text']}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }}
         .step-pill-active {{ color: {c['accent']}; }}
-        .step-dot {{ width: 6px; height: 6px; background: {c['card_border']}; border-radius: 50%; display: inline-block; margin-right: 5px; }}
+        .step-dot {{ width: 5px; height: 5px; background: {c['card_border']}; border-radius: 50%; display: inline-block; margin-right: 5px; }}
         .step-pill-active .step-dot {{ background: {c['accent']}; box-shadow: 0 0 8px {c['accent']}; }}
 
         /* Compact Cards */
         .premium-card {{
             background-color: {c['card_bg']};
-            padding: 0.75rem 1rem;
-            border-radius: 10px;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
             border: 1px solid {c['card_border']};
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }}
         
-        [data-testid="stMetric"] {{ padding: 0.5rem 0.75rem !important; }}
-        h1 {{ font-size: 1.2rem !important; margin: 0 !important; }}
-        h3 {{ font-size: 1rem !important; margin: 0.25rem 0 !important; }}
-        h4 {{ font-size: 0.85rem !important; margin: 0.1rem 0 !important; color: {c['sub_text']}; }}
-        .stCaption {{ font-size: 0.75rem !important; margin-bottom: 0.25rem !important; }}
-        
-        /* Button Compression */
-        .stButton button {{ padding: 0.25rem 1rem !important; min-height: 2.2rem !important; font-size: 0.9rem !important; }}
+        [data-testid="stMetric"] {{ padding: 0.25rem 0.5rem !important; }}
+        h1 {{ font-size: 1.1rem !important; margin: 0 !important; }}
+        h3 {{ font-size: 0.9rem !important; margin: 0.15rem 0 !important; }}
+        h4 {{ font-size: 0.8rem !important; margin: 0.1rem 0 !important; color: {c['sub_text']}; }}
+        .stCaption {{ font-size: 0.7rem !important; margin-bottom: 0.15rem !important; }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- COMPACT HEADER ---
-st.markdown(f"""
-    <div class="header-compact">
-        <div class="header-logo">🎯 CEE HUNTER <span style="font-weight: 300; font-size: 0.8rem; color: {c['sub_text']};">PRO</span></div>
-        <div class="header-title">Outil de prospection intelligente pour Syndics</div>
-    </div>
-""", unsafe_allow_html=True)
+# --- COMPACT HEADER WITH THEME TOGGLE ---
+h_col1, h_col2, h_col3 = st.columns([2, 5, 1])
+with h_col1:
+    st.markdown(f'<div class="header-logo">🎯 CEE HUNTER <span style="font-weight: 300; font-size: 0.75rem; color: {c["sub_text"]};">PRO</span></div>', unsafe_allow_html=True)
+with h_col2:
+    st.markdown(f'<div class="header-title" style="margin-top:4px;">Assistant de prospection intelligente</div>', unsafe_allow_html=True)
+with h_col3:
+    current_icon = "☀️" if st.session_state['theme'] == "Dark" else "🌙"
+    if st.button(current_icon, key="theme_toggle"):
+        st.session_state['theme'] = "Light" if st.session_state['theme'] == "Dark" else "Dark"
+        st.session_state['theme_manually_set'] = True
+        st.rerun()
+
+st.markdown(f'<div style="border-bottom: 1px solid {c["sep_color"]}; margin-bottom: 0.5rem;"></div>', unsafe_allow_html=True)
 
 # --- MICRO STEPPER ---
 s = st.session_state['current_step']
