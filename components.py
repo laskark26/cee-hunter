@@ -239,9 +239,39 @@ PERIOD_LABELS = {
     "A_COMPTER_DE_2011": "Après 2011",
 }
 
-def render_copro_card(name: str, address: str, lots: int, period: str):
+DPE_COLORS = {
+    "A": "#059669", "B": "#10b981", "C": "#84cc16",
+    "D": "#eab308", "E": "#f97316", "F": "#ef4444", "G": "#1f2937",
+}
+
+
+def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data: dict = None):
     """Card for a single copropriété in the targeted portfolio view."""
     period_display = PERIOD_LABELS.get(period, period or "—")
+
+    urbs_html = ""
+    if urbs_data:
+        badges = []
+        dpe = urbs_data.get("dpe", "")
+        if dpe:
+            color = DPE_COLORS.get(dpe.upper(), "#6b7280")
+            badges.append(
+                f'<span style="display:inline-block;font-size:11px;font-weight:700;'
+                f'padding:2px 8px;border-radius:4px;background:{color};color:#fff;">'
+                f'DPE {dpe}</span>'
+            )
+        chauffage = urbs_data.get("chauffage", "")
+        if chauffage:
+            badges.append(f'<span class="cee-copro-badge">🔥 {chauffage}</span>')
+        energie = urbs_data.get("energie", "")
+        if energie:
+            badges.append(f'<span class="cee-copro-badge">⚡ {energie}</span>')
+        annee = urbs_data.get("annee")
+        if annee:
+            badges.append(f'<span class="cee-copro-badge">📅 {annee}</span>')
+        if badges:
+            urbs_html = f'<div class="cee-copro-meta" style="margin-top:4px;">{"".join(badges)}</div>'
+
     st.markdown(
         f'<div class="cee-copro-card">'
         f'<h4>{name or "Copropriété"}</h4>'
@@ -250,6 +280,7 @@ def render_copro_card(name: str, address: str, lots: int, period: str):
         f'<span class="cee-copro-badge">🏠 {lots} lots</span>'
         f'<span class="cee-copro-badge">🏗️ {period_display}</span>'
         f'</div>'
+        f'{urbs_html}'
         f'</div>',
         unsafe_allow_html=True,
     )

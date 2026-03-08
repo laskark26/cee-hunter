@@ -6,6 +6,7 @@ from core.data_manager import (
     count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES,
     init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
 )
+from core.urbs_connector import urbs_enrich_address
 from styles import generate_css, get_theme, score_color, PALETTE
 from components import (
     render_header, render_stepper, render_kpi_card, render_score_gauge,
@@ -1030,8 +1031,9 @@ elif st.session_state["current_step"] == 3:
                         address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
                         lots = int(row.get(lots_col, 0))
                         period = row.get("periode_de_construction", "")
+                        urbs_data = urbs_enrich_address(address) if address else None
                         with col:
-                            render_copro_card(str(copro_name), address, lots, str(period))
+                            render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_data)
 
     # ──────────────────────────────────────────────────────────
     # TAB: Tout le parc
