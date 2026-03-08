@@ -36,6 +36,7 @@ URL_BLACKLIST = [
     "trustpilot.com", "glassdoor.fr", "indeed.fr", "welcometothejungle.com",
     "wikipedia.org", "wikidata.org",
     "vicinorum.com", "annuairedescoproprietes.fr",
+    "meilleurecopro.com", "coproprietes.lexposia.com",
 ]
 
 PAGE_BLACKLIST_KEYWORDS = [
@@ -430,11 +431,12 @@ class SyndicIntelligence:
             print(f"DEBUG: SERP search error: {e}")
         return []
 
-    def google_search(self, name):
-        """Run 2 Google searches and return up to 5 deduplicated organic results."""
+    def google_search(self, name, city=""):
+        """Run Google searches with city context and return up to 5 deduplicated organic results."""
+        city_part = f" {city}" if city else ""
         queries = [
-            f'"{name}"',
-            f'"{name}" syndic copropriété',
+            f'"{name}"{city_part} syndic copropriété',
+            f'"{name}"{city_part}',
         ]
         all_results = []
         seen_links = set()
@@ -1091,8 +1093,8 @@ class SyndicIntelligence:
                 return cached
 
         # 1. Google SERP
-        _status(f"[1/7] Recherche Google SERP pour '{name}'...")
-        serp_results = self.google_search(name)
+        _status(f"[1/7] Recherche Google SERP pour '{name}' à '{city}'...")
+        serp_results = self.google_search(name, city=city)
         _status(f"[1/7] SERP : {len(serp_results)} résultats trouvés")
 
         # 2. Google Maps
