@@ -6,7 +6,7 @@ from core.data_manager import (
     count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES,
     init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
 )
-from core.urbs_connector import urbs_enrich_address
+from core.urbs_connector import urbs_enrich_address, init_urbs_table
 from styles import generate_css, get_theme, score_color, PALETTE
 from components import (
     render_header, render_stepper, render_kpi_card, render_score_gauge,
@@ -147,6 +147,10 @@ if st.session_state["current_step"] == 1:
     if "saved_searches_init" not in st.session_state:
         init_saved_searches_table()
         st.session_state["saved_searches_init"] = True
+
+    if "urbs_table_init" not in st.session_state:
+        init_urbs_table()
+        st.session_state["urbs_table_init"] = True
 
     if "saved_searches_cache" not in st.session_state:
         st.session_state["saved_searches_cache"] = get_saved_searches()
@@ -1031,7 +1035,8 @@ elif st.session_state["current_step"] == 3:
                         address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
                         lots = int(row.get(lots_col, 0))
                         period = row.get("periode_de_construction", "")
-                        urbs_data = urbs_enrich_address(address) if address else None
+                        numero_immat = str(row.get("numero_immatriculation_copropriete", ""))
+                        urbs_data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
                         with col:
                             render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_data)
 
