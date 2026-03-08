@@ -26,6 +26,8 @@ URL_BLACKLIST = [
     "instagram.com", "twitter.com", "x.com", "youtube.com",
     "annuaire-entreprises.data.gouv.fr", "pappers.fr", "infogreffe.fr",
     "manageo.fr", "score3.fr", "entreprise.lefigaro.fr",
+    "syndicompare.com", "syndic-one.com", "cotoit.com", "comparateur-syndic.com",
+    "changersyndic.net", "monimmeuble.com", "baticopro.com",
 ]
 
 PAGE_BLACKLIST_KEYWORDS = [
