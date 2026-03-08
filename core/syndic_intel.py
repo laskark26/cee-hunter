@@ -1109,6 +1109,9 @@ class SyndicIntelligence:
             _status("[2/7] Maps : aucun résultat")
 
         # 3. Identify domain
+        if domain and any(bl in domain.lower() for bl in URL_BLACKLIST):
+            _status(f"[3/7] Domaine fourni rejeté (blacklist) : {domain}")
+            domain = None
         _status(f"[3/7] Identification du domaine (fourni: {domain or 'aucun'})...")
         if not domain:
             domain, domain_source = self.identify_domain(serp_results, name, pappers_data, maps_data)

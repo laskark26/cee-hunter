@@ -527,7 +527,10 @@ elif st.session_state["current_step"] == 3:
                     if not domain and pappers_info:
                         sites = pappers_info.get("sites_internet", "")
                         if sites:
-                            domain = sites.split(",")[0].strip().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+                            candidate = sites.split(",")[0].strip().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+                            from core.syndic_intel import URL_BLACKLIST
+                            if candidate and not any(bl in candidate.lower() for bl in URL_BLACKLIST):
+                                domain = candidate
 
                     city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
                     result = intel_engine.run_intelligence(
