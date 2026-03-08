@@ -37,6 +37,7 @@ URL_BLACKLIST = [
     "wikipedia.org", "wikidata.org",
     "vicinorum.com", "annuairedescoproprietes.fr",
     "meilleurecopro.com", "coproprietes.lexposia.com",
+    "le-comptoir-de-la-copropriete.fr",
 ]
 
 PAGE_BLACKLIST_KEYWORDS = [
@@ -434,10 +435,9 @@ class SyndicIntelligence:
 
     def google_search(self, name, city=""):
         """Run Google searches with city context and return up to 5 deduplicated organic results."""
-        city_part = f" {city}" if city else ""
         queries = [
-            f'"{name}"{city_part} syndic copropriété',
-            f'"{name}"{city_part}',
+            f'"{name}" syndic',
+            f'"{name}" syndic {city}'.strip(),
         ]
         all_results = []
         seen_links = set()
