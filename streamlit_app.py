@@ -1008,10 +1008,27 @@ elif st.session_state["current_step"] == 3:
         if df_parc.empty:
             render_empty_state("Aucune copropriété ciblée", "Les filtres actuels ne retournent aucun résultat pour ce syndic.", "🏢")
         else:
+            lots_col = "nombre_de_lots_a_usage_d_habitation"
+
+            # Pre-enrich all copros and collect distinct URBS values
+            urbs_cache = {}
+            chauffage_values = set()
+            energie_values = set()
+            for idx in range(len(df_parc)):
+                row = df_parc.iloc[idx]
+                address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
+                numero_immat = str(row.get("numero_immatriculation_copropriete", ""))
+                data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
+                urbs_cache[idx] = data
+                if data:
+                    if data.get("chauffage"):
+                        chauffage_values.add(data["chauffage"])
+                    if data.get("energie"):
+                        energie_values.add(data["energie"])
+
             # Stats summary
             nb_copros = len(df_parc)
             communes_uniques = df_parc["commune"].nunique() if "commune" in df_parc.columns else 0
-            lots_col = "nombre_de_lots_a_usage_d_habitation"
             lots_moy = int(df_parc[lots_col].mean()) if lots_col in df_parc.columns else 0
 
             s1, s2, s3 = st.columns(3)
@@ -1022,23 +1039,45 @@ elif st.session_state["current_step"] == 3:
             with s3:
                 render_kpi_card("Lots moyens", lots_moy)
 
+            # Filters
+            if chauffage_values or energie_values:
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    sel_chauffage = st.multiselect("Type de chauffage", sorted(chauffage_values), default=[], key="filter_chauffage_parc")
+                with fc2:
+                    sel_energie = st.multiselect("Type d'énergie", sorted(energie_values), default=[], key="filter_energie_parc")
+            else:
+                sel_chauffage = []
+                sel_energie = []
+
             st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
 
-            # Cards grid
-            cols_per_row = 3
-            for i in range(0, len(df_parc), cols_per_row):
-                cols = st.columns(cols_per_row)
-                for j, col in enumerate(cols):
-                    if i + j < len(df_parc):
-                        row = df_parc.iloc[i + j]
-                        copro_name = row.get("nom_copropriete", "") or row.get("numero_immatriculation_copropriete", f"Copro #{i+j+1}")
-                        address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
-                        lots = int(row.get(lots_col, 0))
-                        period = row.get("periode_de_construction", "")
-                        numero_immat = str(row.get("numero_immatriculation_copropriete", ""))
-                        urbs_data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
-                        with col:
-                            render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_data)
+            # Cards grid (filtered)
+            filtered_indices = []
+            for idx in range(len(df_parc)):
+                data = urbs_cache.get(idx)
+                if sel_chauffage and (not data or data.get("chauffage", "") not in sel_chauffage):
+                    continue
+                if sel_energie and (not data or data.get("energie", "") not in sel_energie):
+                    continue
+                filtered_indices.append(idx)
+
+            if not filtered_indices:
+                render_empty_state("Aucun résultat", "Aucune copropriété ne correspond aux filtres sélectionnés.", "🔍")
+            else:
+                cols_per_row = 3
+                for i in range(0, len(filtered_indices), cols_per_row):
+                    cols = st.columns(cols_per_row)
+                    for j, col in enumerate(cols):
+                        if i + j < len(filtered_indices):
+                            idx = filtered_indices[i + j]
+                            row = df_parc.iloc[idx]
+                            copro_name = row.get("nom_copropriete", "") or row.get("numero_immatriculation_copropriete", f"Copro #{idx+1}")
+                            address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
+                            lots = int(row.get(lots_col, 0))
+                            period = row.get("periode_de_construction", "")
+                            with col:
+                                render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_cache.get(idx))
 
     # ──────────────────────────────────────────────────────────
     # TAB: Tout le parc
