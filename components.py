@@ -245,9 +245,22 @@ DPE_COLORS = {
 }
 
 
+def _google_earth_url(address: str) -> str:
+    from urllib.parse import quote_plus
+    return f"https://earth.google.com/web/search/{quote_plus(address)}"
+
+
 def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data: dict = None):
     """Card for a single copropriété in the targeted portfolio view."""
     period_display = PERIOD_LABELS.get(period, period or "—")
+
+    earth_link = ""
+    if address:
+        earth_url = _google_earth_url(address)
+        earth_link = (
+            f' <a href="{earth_url}" target="_blank" title="Voir sur Google Earth"'
+            f' style="text-decoration:none;font-size:14px;vertical-align:middle;">🌍</a>'
+        )
 
     urbs_html = ""
     if urbs_data:
@@ -275,7 +288,7 @@ def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data
     st.markdown(
         f'<div class="cee-copro-card">'
         f'<h4>{name or "Copropriété"}</h4>'
-        f'<p style="font-size:12px;color:#6B7280;margin:0 0 8px 0;">{address}</p>'
+        f'<p style="font-size:12px;color:#6B7280;margin:0 0 8px 0;">{address}{earth_link}</p>'
         f'<div class="cee-copro-meta">'
         f'<span class="cee-copro-badge">🏠 {lots} lots</span>'
         f'<span class="cee-copro-badge">🏗️ {period_display}</span>'
