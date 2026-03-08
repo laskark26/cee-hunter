@@ -13,7 +13,7 @@ from rapidfuzz import fuzz
 
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_syndic_intel"
-ANALYSIS_VERSION = 4
+ANALYSIS_VERSION = 5
 DEFAULT_TTL_DAYS = 30
 
 # ── SerpApi Configuration ─────────────────────────────────
@@ -38,6 +38,7 @@ PAGE_PRIORITY_KEYWORDS = [
     "about", "propos", "equipe", "team", "service", "contact",
     "qui-sommes", "notre-cabinet", "notre-agence", "nos-metiers",
     "copropriete", "gestion", "syndic",
+    "conseiller", "collaborateur", "annuaire", "direction", "gerant", "agence",
 ]
 
 ANALYSIS_PROMPT = """Tu es un analyste B2B expert en syndics de copropriété français.
@@ -61,6 +62,9 @@ ANALYSIS_PROMPT = """Tu es un analyste B2B expert en syndics de copropriété fr
 ## Employés et contacts (Apollo)
 {apollo_contacts}
 
+## Contacts extraits du site web (scraper LLM)
+{scraped_contacts}
+
 ## Contexte
 Ce syndic gère {nb_copros} copropriétés représentant {total_lots} lots au total.
 Nous cherchons à le prospecter pour des projets de rénovation énergétique (CEE - Certificats d'Économies d'Énergie).
@@ -68,7 +72,8 @@ Nous cherchons à le prospecter pour des projets de rénovation énergétique (C
 ## Instructions
 1. Croise les données de toutes les sources pour vérifier la cohérence (téléphone, adresse, email).
 2. Privilégie les données Google Maps et du site web pour le téléphone et l'email (plus fiables que Pappers).
-3. Produis UNIQUEMENT un JSON valide (sans markdown, sans ```), avec cette structure exacte :
+3. Fusionne les contacts Apollo et les contacts extraits du site web dans `contacts_cles`. Déduplique par nom/email. Privilégie les rôles de direction, gestion de copropriété et administration de biens.
+4. Produis UNIQUEMENT un JSON valide (sans markdown, sans ```), avec cette structure exacte :
 {{
   "resume_activite": "Description en 2-3 phrases de l'activité du syndic",
   "taille_estimee": "TPE ou PME ou ETI ou GE",
@@ -156,6 +161,7 @@ def init_intel_cache():
             "serp_results_json": "STRING",
             "identified_domain": "STRING",
             "domain_source": "STRING",
+            "scraped_contacts_json": "STRING",
         }
         for col, col_type in new_cols.items():
             if col not in existing_cols:
@@ -167,7 +173,7 @@ def init_intel_cache():
 
 
 class SyndicIntelligence:
-    MAX_PAGES = 5
+    MAX_PAGES = 8
     MAX_CHARS_PER_PAGE = 8000
     SCRAPE_TIMEOUT = 30
 
@@ -200,7 +206,8 @@ class SyndicIntelligence:
             if last and (datetime.now() - last.replace(tzinfo=None)) > timedelta(days=ttl):
                 return None
             for field in ("llm_analysis_json", "social_links_json", "apollo_contacts_json",
-                          "scraped_phones", "scraped_emails", "google_maps_json", "serp_results_json"):
+                          "scraped_phones", "scraped_emails", "google_maps_json", "serp_results_json",
+                          "scraped_contacts_json"):
                 val = row.get(field)
                 if isinstance(val, str):
                     try:
@@ -219,7 +226,8 @@ class SyndicIntelligence:
             data["cache_ttl_days"] = DEFAULT_TTL_DAYS
             row = dict(data)
             for field in ("llm_analysis_json", "social_links_json", "apollo_contacts_json",
-                          "scraped_phones", "scraped_emails", "google_maps_json", "serp_results_json"):
+                          "scraped_phones", "scraped_emails", "google_maps_json", "serp_results_json",
+                          "scraped_contacts_json"):
                 val = row.get(field)
                 if isinstance(val, (dict, list)):
                     row[field] = json.dumps(val, ensure_ascii=False)
@@ -395,13 +403,17 @@ class SyndicIntelligence:
         }, timeout=self.SCRAPE_TIMEOUT, allow_redirects=True)
 
     def scrape_website(self, domain):
-        """Scrape the syndic website using direct requests + BeautifulSoup."""
+        """Scrape the syndic website using direct requests + BeautifulSoup.
+        Returns (content, phones, emails, team_pages_text).
+        team_pages_text is a list of texts from priority pages (equipe/contact/etc.)
+        """
         if not domain:
-            return "", [], []
+            return "", [], [], []
         base_url = f"https://{domain}"
         all_text = []
         all_phones = set()
         all_emails = set()
+        team_pages_text = []
         visited = set()
         to_visit = [base_url]
 
@@ -439,6 +451,9 @@ class SyndicIntelligence:
                 page_text = soup.get_text(separator=" ", strip=True)
                 page_text = re.sub(r"\s+", " ", page_text)[:self.MAX_CHARS_PER_PAGE]
                 all_text.append(f"[PAGE: {url}]\n{page_text}")
+
+                if self._is_priority_page(url):
+                    team_pages_text.append(f"[PAGE: {url}]\n{page_text}")
             except Exception as e:
                 print(f"DEBUG: Scrape error for {url}: {e}")
                 continue
@@ -452,7 +467,52 @@ class SyndicIntelligence:
             if all_emails:
                 content += f"\nEmails trouvés : {', '.join(sorted(all_emails))}"
 
-        return content, list(all_phones), list(all_emails)
+        return content, list(all_phones), list(all_emails), team_pages_text
+
+    # ── LLM Contact Extraction ─────────────────────────────
+
+    def _extract_contacts_with_llm(self, team_pages_text):
+        """Use GPT-4o-mini to extract structured contacts from team/contact page text."""
+        if not self.openai_client or not team_pages_text:
+            return []
+
+        combined = "\n\n".join(team_pages_text)[:12000]
+
+        prompt = (
+            "Tu es un assistant spécialisé dans l'extraction de contacts depuis des pages web de syndics de copropriété.\n\n"
+            "Voici le texte brut extrait de pages 'équipe', 'contact', 'conseillers', 'direction' d'un site de syndic :\n\n"
+            f"{combined}\n\n"
+            "Extrais TOUS les contacts identifiables. Privilégie les rôles pertinents pour la prospection :\n"
+            "- Gérants, directeurs, directeurs d'agence\n"
+            "- Gestionnaires de copropriété, responsables syndic\n"
+            "- Administrateurs de biens, responsables techniques\n"
+            "- Chargés de clientèle, conseillers\n\n"
+            "Réponds UNIQUEMENT en JSON valide (sans markdown, sans ```), sous forme de liste :\n"
+            '[{"nom": "Prénom Nom", "poste": "Titre du poste", "email": "si disponible sinon vide", '
+            '"telephone": "si disponible sinon vide", "source": "site_web"}]\n\n'
+            "Si aucun contact n'est identifiable, retourne une liste vide []."
+        )
+
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Tu extrais des contacts structurés. Réponds uniquement en JSON valide."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                max_tokens=2000,
+            )
+            raw = response.choices[0].message.content.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            contacts = json.loads(raw)
+            if isinstance(contacts, list):
+                print(f"DEBUG: LLM extracted {len(contacts)} contacts from team pages")
+                return contacts
+        except Exception as e:
+            print(f"DEBUG: LLM contact extraction error: {e}")
+        return []
 
     # ── SerpApi: Social & Reputation (via Google SERP) ──────
 
@@ -648,7 +708,8 @@ class SyndicIntelligence:
     # ── LLM Analysis ─────────────────────────────────────────
 
     def analyze_with_llm(self, website_content, social_links, reviews_data, legal_data,
-                         apollo_contacts=None, google_maps_data=None, nb_copros=0, total_lots=0):
+                         apollo_contacts=None, google_maps_data=None, nb_copros=0, total_lots=0,
+                         scraped_contacts=None):
         if not self.openai_client:
             return self._fallback_analysis(social_links, legal_data, apollo_contacts, google_maps_data)
 
@@ -683,6 +744,18 @@ class SyndicIntelligence:
                 parts.append(f"Horaires: {json.dumps(google_maps_data['open'], ensure_ascii=False)}")
             maps_summary = "\n".join(parts)
 
+        scraped_contacts_summary = "Aucun contact extrait du site web"
+        if scraped_contacts:
+            lines_sc = []
+            for sc in scraped_contacts[:20]:
+                parts_sc = [f"{sc.get('nom', 'N/A')} - {sc.get('poste', 'N/A')}"]
+                if sc.get("email"):
+                    parts_sc.append(f"Email: {sc['email']}")
+                if sc.get("telephone"):
+                    parts_sc.append(f"Tél: {sc['telephone']}")
+                lines_sc.append(" | ".join(parts_sc))
+            scraped_contacts_summary = "\n".join(lines_sc)
+
         prompt = ANALYSIS_PROMPT.format(
             legal_data=json.dumps(legal_data, ensure_ascii=False, default=str) if legal_data else "Non disponible",
             website_content=website_content[:15000] if website_content else "Site web non accessible",
@@ -690,6 +763,7 @@ class SyndicIntelligence:
             social_links=json.dumps(social_links, ensure_ascii=False) if social_links else "Aucun réseau social trouvé",
             reviews_data=reviews_data if reviews_data else "Aucun avis trouvé",
             apollo_contacts=contacts_summary,
+            scraped_contacts=scraped_contacts_summary,
             nb_copros=nb_copros,
             total_lots=total_lots,
         )
@@ -794,8 +868,17 @@ class SyndicIntelligence:
 
         # 4. Scrape website
         _status(f"[4/7] Scraping du site {domain or 'N/A'}...")
-        website_content, scraped_phones, scraped_emails = self.scrape_website(domain)
-        _status(f"[4/7] Scraping : {len(website_content)} chars, {len(scraped_phones)} tél, {len(scraped_emails)} emails")
+        website_content, scraped_phones, scraped_emails, team_pages_text = self.scrape_website(domain)
+        _status(f"[4/7] Scraping : {len(website_content)} chars, {len(scraped_phones)} tél, {len(scraped_emails)} emails, {len(team_pages_text)} pages équipe")
+
+        # 4b. LLM contact extraction from team pages
+        scraped_contacts = []
+        if team_pages_text:
+            _status(f"[4b] Extraction LLM de contacts depuis {len(team_pages_text)} pages équipe/contact...")
+            scraped_contacts = self._extract_contacts_with_llm(team_pages_text)
+            _status(f"[4b] {len(scraped_contacts)} contacts extraits par LLM")
+        else:
+            _status("[4b] Aucune page équipe/contact détectée, extraction LLM ignorée")
 
         # 5. Social presence
         _status("[5/7] Recherche présence réseaux sociaux...")
@@ -814,6 +897,8 @@ class SyndicIntelligence:
         _status(f"[7/7] Apollo : {len(apollo_contacts)} contacts trouvés")
 
         # LLM Analysis
+        if domain:
+            _status(f"🌐 Site identifié : {domain}")
         _status("Analyse LLM en cours (GPT-4o-mini)...")
         llm_analysis = self.analyze_with_llm(
             website_content=website_content,
@@ -824,6 +909,7 @@ class SyndicIntelligence:
             google_maps_data=maps_data,
             nb_copros=nb_copros,
             total_lots=total_lots,
+            scraped_contacts=scraped_contacts,
         )
 
         result = {
@@ -841,6 +927,7 @@ class SyndicIntelligence:
             "serp_results_json": serp_results,
             "identified_domain": domain or "",
             "domain_source": domain_source,
+            "scraped_contacts_json": scraped_contacts,
         }
 
         self.save_to_cache(result)

@@ -554,6 +554,19 @@ elif st.session_state["current_step"] == 3:
                             parts.append(f"📧 {e} <small>(site)</small>")
                     render_info_card("Coordonnées vérifiées", " · ".join(parts), icon="📇")
 
+            # ── Identified Domain ────────────────────────────
+            id_domain = intel_data.get("identified_domain", "")
+            if id_domain:
+                domain_url = f"https://{id_domain}"
+                accent_color = t["accent"]
+                render_info_card(
+                    "Site internet identifié",
+                    f'🌐 <a href="{domain_url}" target="_blank" style="color:{accent_color};text-decoration:none;font-weight:600;">'
+                    f'{id_domain}</a>'
+                    f' <span style="font-size:11px;color:{t["text_secondary"]};">(source: {intel_data.get("domain_source", "?")})</span>',
+                    icon="🔗",
+                )
+
             # ── Summary + Approach ────────────────────────────
             resume = (analysis.get("resume_activite") or "").strip()
             angle = (analysis.get("angle_approche_recommande") or "").strip()
@@ -722,6 +735,30 @@ elif st.session_state["current_step"] == 3:
 
                 st.markdown(f"**Téléphones scrapés :** {', '.join(raw_phones) if raw_phones else 'Aucun'}")
                 st.markdown(f"**Emails scrapés :** {', '.join(raw_emails) if raw_emails else 'Aucun'}")
+
+                # Scraped contacts from LLM extraction
+                scraped_contacts_raw = intel_data.get("scraped_contacts_json", [])
+                if isinstance(scraped_contacts_raw, str):
+                    try:
+                        scraped_contacts_raw = json.loads(scraped_contacts_raw)
+                    except Exception:
+                        scraped_contacts_raw = []
+                if scraped_contacts_raw:
+                    st.markdown(f"**Contacts extraits du site web (LLM) : {len(scraped_contacts_raw)} contact(s)**")
+                    for sc_idx, sc in enumerate(scraped_contacts_raw, 1):
+                        sc_nom = sc.get("nom", "—")
+                        sc_poste = sc.get("poste", "—")
+                        sc_email = sc.get("email", "")
+                        sc_tel = sc.get("telephone", "")
+                        sc_details = []
+                        if sc_email:
+                            sc_details.append(f"📧 {sc_email}")
+                        if sc_tel:
+                            sc_details.append(f"📞 {sc_tel}")
+                        detail_str = f" — {' · '.join(sc_details)}" if sc_details else ""
+                        st.markdown(f"{sc_idx}. **{sc_nom}** — _{sc_poste}_{detail_str}")
+                else:
+                    st.markdown("**Contacts extraits du site web (LLM) :** Aucun")
 
                 raw_content = intel_data.get("raw_website_content", "")
                 if raw_content:
