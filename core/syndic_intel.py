@@ -434,8 +434,9 @@ class SyndicIntelligence:
         return []
 
     def google_search(self, name, city=""):
-        """Run Google searches with city context and return up to 5 deduplicated organic results."""
+        """Run Google searches and return (results, queries_used)."""
         queries = [
+            name,
             f'{name} syndic',
             f'{name} syndic {city}'.strip(),
         ]
@@ -459,7 +460,7 @@ class SyndicIntelligence:
             if len(all_results) >= 5:
                 break
 
-        return all_results[:5]
+        return all_results[:5], queries
 
     # ── SerpApi: Google Maps Search ─────────────────────────
 
@@ -1097,8 +1098,8 @@ class SyndicIntelligence:
 
         # 1. Google SERP
         _status(f"[1/7] Recherche Google SERP pour '{name}' à '{city}'...")
-        serp_results = self.google_search(name, city=city)
-        _status(f"[1/7] SERP : {len(serp_results)} résultats trouvés")
+        serp_results, serp_queries = self.google_search(name, city=city)
+        _status(f"[1/7] SERP : {len(serp_results)} résultats trouvés ({len(serp_queries)} requêtes)")
 
         # 2. Google Maps
         _status(f"[2/7] Recherche Google Maps pour '{name}' à '{city}'...")
@@ -1185,6 +1186,7 @@ class SyndicIntelligence:
             "scraped_emails": scraped_emails,
             "google_maps_json": maps_data,
             "serp_results_json": serp_results,
+            "serp_queries": serp_queries,
             "identified_domain": domain or "",
             "domain_source": domain_source,
             "scraped_contacts_json": scraped_contacts,

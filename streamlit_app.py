@@ -756,6 +756,11 @@ elif st.session_state["current_step"] == 3:
 
                 st.markdown(f"**Domaine identifié :** `{identified_domain or 'Aucun'}` (source: `{domain_source}`)")
 
+                serp_queries = intel_data.get("serp_queries", [])
+                if serp_queries:
+                    queries_str = " · ".join(f'`{q}`' for q in serp_queries)
+                    st.markdown(f"**Requêtes SERP :** {queries_str}")
+
                 if serp_json:
                     st.markdown("**Résultats Google SERP :**")
                     for idx_s, sr in enumerate(serp_json, 1):
