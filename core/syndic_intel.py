@@ -454,7 +454,8 @@ class SyndicIntelligence:
                 page_text = re.sub(r"\s+", " ", page_text)[:self.MAX_CHARS_PER_PAGE]
                 all_text.append(f"[PAGE: {url}]\n{page_text}")
 
-                if self._is_priority_page(url):
+                is_home = (url.rstrip("/") == base_url.rstrip("/"))
+                if self._is_priority_page(url) or is_home:
                     team_pages_text.append(f"[PAGE: {url}]\n{page_text}")
             except Exception as e:
                 print(f"DEBUG: Scrape error for {url}: {e}")
@@ -478,17 +479,25 @@ class SyndicIntelligence:
         if not self.openai_client or not team_pages_text:
             return []
 
-        combined = "\n\n".join(team_pages_text)[:12000]
+        combined = "\n\n".join(team_pages_text)[:16000]
 
         prompt = (
             "Tu es un assistant spécialisé dans l'extraction de contacts depuis des pages web de syndics de copropriété.\n\n"
-            "Voici le texte brut extrait de pages 'équipe', 'contact', 'conseillers', 'direction' d'un site de syndic :\n\n"
+            "Voici le texte brut extrait de pages d'un site de syndic (équipe, contact, conseillers, syndic, direction, accueil) :\n\n"
             f"{combined}\n\n"
-            "Extrais TOUS les contacts identifiables. Privilégie les rôles pertinents pour la prospection :\n"
-            "- Gérants, directeurs, directeurs d'agence\n"
-            "- Gestionnaires de copropriété, responsables syndic\n"
+            "## Instructions d'extraction\n\n"
+            "Extrais TOUS les contacts identifiables, même ceux mentionnés indirectement. Cherche :\n"
+            "- Les noms propres (Prénom NOM ou NOM Prénom) associés à un rôle, un téléphone ou un email\n"
+            "- Les formulations du type 'Contactez X', 'joindre X au...', 'votre interlocuteur : X'\n"
+            "- Les noms dans les fiches de présentation d'équipe, les signatures, les formulaires de contact\n"
+            "- Le directeur/gérant mentionné dans les mentions légales ou la présentation de l'agence\n\n"
+            "Rôles prioritaires pour la prospection CEE :\n"
+            "- Gérants, directeurs, PDG, présidents\n"
+            "- Responsables syndic, gestionnaires de copropriété\n"
             "- Administrateurs de biens, responsables techniques\n"
-            "- Chargés de clientèle, conseillers\n\n"
+            "- Chargés de clientèle, conseillers, négociateurs\n\n"
+            "IMPORTANT : Si un numéro de téléphone est mentionné à côté d'un nom, associe-le à ce contact.\n"
+            "Si un email est mentionné à côté d'un nom, associe-le à ce contact.\n\n"
             "Réponds UNIQUEMENT en JSON valide (sans markdown, sans ```), sous forme de liste :\n"
             '[{"nom": "Prénom Nom", "poste": "Titre du poste", "email": "si disponible sinon vide", '
             '"telephone": "si disponible sinon vide", "source": "site_web"}]\n\n'
