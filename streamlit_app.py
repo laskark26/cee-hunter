@@ -663,7 +663,9 @@ elif st.session_state['current_step'] == 3:
                 if maps_json.get("phone"):
                     maps_parts.append(f"📞 {maps_json['phone']}")
                 if maps_json.get("url"):
-                    maps_parts.append(f"🌐 <a href='{maps_json['url']}' target='_blank' style='color:{c[\"accent\"]};'>{maps_json['url'][:50]}</a>")
+                    accent_color = c['accent']
+                    maps_url = maps_json['url']
+                    maps_parts.append(f"🌐 <a href='{maps_url}' target='_blank' style='color:{accent_color};'>{maps_url[:50]}</a>")
                 if maps_parts:
                     st.markdown(
                         '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Google Maps</p>'
