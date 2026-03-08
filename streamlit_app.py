@@ -566,15 +566,33 @@ elif st.session_state['current_step'] == 3:
                     <p style="font-size:0.8rem; margin:0;">{reputation}</p>
                 </div>""", unsafe_allow_html=True)
 
-            # Telephone & Email principaux
+            # Telephone & Email principaux + scraped from website
             tel_principal = analysis.get("telephone_principal", "")
             email_principal = analysis.get("email_principal", "")
-            if tel_principal or email_principal:
-                contact_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📞 Contact principal</p>'
+            scraped_phones = intel_data.get("scraped_phones", [])
+            scraped_emails = intel_data.get("scraped_emails", [])
+            if isinstance(scraped_phones, str):
+                try: scraped_phones = json.loads(scraped_phones)
+                except Exception: scraped_phones = []
+            if isinstance(scraped_emails, str):
+                try: scraped_emails = json.loads(scraped_emails)
+                except Exception: scraped_emails = []
+
+            has_contact_info = tel_principal or email_principal or scraped_phones or scraped_emails
+            if has_contact_info:
+                contact_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📞 Coordonnées</p>'
                 if tel_principal:
-                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Tél : <b>{tel_principal}</b></p>'
+                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Tél principal : <b>{tel_principal}</b></p>'
                 if email_principal:
-                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Email : <b>{email_principal}</b></p>'
+                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Email principal : <b>{email_principal}</b></p>'
+                if scraped_phones:
+                    extra_phones = [p for p in scraped_phones if p != tel_principal.replace(" ", "").replace(".", "")]
+                    if extra_phones:
+                        contact_html += f'<p style="font-size:0.75rem; margin:0.15rem 0 0 0; color:{c["sub_text"]};">Tél (site web) : {", ".join(extra_phones)}</p>'
+                if scraped_emails:
+                    extra_emails = [e for e in scraped_emails if e != (email_principal or "").lower()]
+                    if extra_emails:
+                        contact_html += f'<p style="font-size:0.75rem; margin:0.15rem 0 0 0; color:{c["sub_text"]};">Emails (site web) : {", ".join(extra_emails)}</p>'
                 contact_html += '</div>'
                 st.markdown(contact_html, unsafe_allow_html=True)
 

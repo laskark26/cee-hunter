@@ -106,6 +106,8 @@ def init_intel_cache():
             social_links_json STRING,
             reviews_raw STRING,
             apollo_contacts_json STRING,
+            scraped_phones STRING,
+            scraped_emails STRING,
             llm_analysis_json STRING,
             llm_model_used STRING,
             last_analyzed TIMESTAMP,
@@ -147,7 +149,8 @@ class SyndicIntelligence:
             ttl = row.get("cache_ttl_days") or DEFAULT_TTL_DAYS
             if last and (datetime.now() - last.replace(tzinfo=None)) > timedelta(days=ttl):
                 return None
-            for field in ("llm_analysis_json", "social_links_json", "apollo_contacts_json"):
+            for field in ("llm_analysis_json", "social_links_json", "apollo_contacts_json",
+                          "scraped_phones", "scraped_emails"):
                 val = row.get(field)
                 if isinstance(val, str):
                     try:
@@ -165,7 +168,8 @@ class SyndicIntelligence:
             data["analysis_version"] = ANALYSIS_VERSION
             data["cache_ttl_days"] = DEFAULT_TTL_DAYS
             row = dict(data)
-            for field in ("llm_analysis_json", "social_links_json", "apollo_contacts_json"):
+            for field in ("llm_analysis_json", "social_links_json", "apollo_contacts_json",
+                          "scraped_phones", "scraped_emails"):
                 val = row.get(field)
                 if isinstance(val, (dict, list)):
                     row[field] = json.dumps(val, ensure_ascii=False)
@@ -175,11 +179,52 @@ class SyndicIntelligence:
 
     # ── Web Scraping ─────────────────────────────────────────
 
+    PHONE_RE = re.compile(
+        r'(?:\+33[\s.]?|0)(?:[1-9])(?:[\s.\-]?\d{2}){4}'
+    )
+    EMAIL_RE = re.compile(
+        r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'
+    )
+
+    def _extract_contact_info(self, soup):
+        """Extract phones and emails from the full HTML before stripping nav/footer."""
+        phones = set()
+        emails = set()
+
+        # 1. tel: and mailto: links
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith("tel:"):
+                raw = href[4:].strip()
+                raw = re.sub(r"[^\d+]", "", raw)
+                if len(raw) >= 10:
+                    phones.add(raw)
+            elif href.startswith("mailto:"):
+                addr = href[7:].split("?")[0].strip().lower()
+                if "@" in addr:
+                    emails.add(addr)
+
+        # 2. Regex on full page text (including footer/header)
+        full_text = soup.get_text(separator=" ", strip=True)
+        for match in self.PHONE_RE.findall(full_text):
+            cleaned = re.sub(r"[\s.\-]", "", match)
+            if len(cleaned) >= 10:
+                phones.add(cleaned)
+        for match in self.EMAIL_RE.findall(full_text):
+            addr = match.lower()
+            generic = {"noreply", "no-reply", "mailer-daemon", "postmaster"}
+            if not any(g in addr for g in generic):
+                emails.add(addr)
+
+        return list(phones), list(emails)
+
     def scrape_website(self, domain):
         if not domain:
-            return ""
+            return "", [], []
         base_url = f"https://{domain}"
         all_text = []
+        all_phones = set()
+        all_emails = set()
         visited = set()
         to_visit = [base_url]
 
@@ -193,13 +238,13 @@ class SyndicIntelligence:
                 if resp.status_code != 200 or "text/html" not in resp.headers.get("Content-Type", ""):
                     continue
                 soup = BeautifulSoup(resp.text, "html.parser")
-                for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe"]):
-                    tag.decompose()
 
-                page_text = soup.get_text(separator=" ", strip=True)
-                page_text = re.sub(r"\s+", " ", page_text)[:self.MAX_CHARS_PER_PAGE]
-                all_text.append(f"[PAGE: {url}]\n{page_text}")
+                # Extract contacts BEFORE stripping footer/header
+                page_phones, page_emails = self._extract_contact_info(soup)
+                all_phones.update(page_phones)
+                all_emails.update(page_emails)
 
+                # Collect internal links before decomposing nav
                 if len(visited) < self.MAX_PAGES:
                     for link in soup.find_all("a", href=True):
                         href = link["href"]
@@ -209,10 +254,28 @@ class SyndicIntelligence:
                             lower = href.lower()
                             if any(kw in lower for kw in ["about", "propos", "equipe", "team", "service", "contact", "qui-sommes"]):
                                 to_visit.insert(0, href)
+
+                # Now strip non-content tags for the text extraction
+                for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe"]):
+                    tag.decompose()
+
+                page_text = soup.get_text(separator=" ", strip=True)
+                page_text = re.sub(r"\s+", " ", page_text)[:self.MAX_CHARS_PER_PAGE]
+                all_text.append(f"[PAGE: {url}]\n{page_text}")
             except Exception:
                 continue
 
-        return "\n\n".join(all_text)[:30000]
+        content = "\n\n".join(all_text)[:30000]
+
+        # Append extracted contact info so the LLM sees it
+        if all_phones or all_emails:
+            content += "\n\n[CONTACTS EXTRAITS DU SITE WEB]"
+            if all_phones:
+                content += f"\nTéléphones trouvés : {', '.join(sorted(all_phones))}"
+            if all_emails:
+                content += f"\nEmails trouvés : {', '.join(sorted(all_emails))}"
+
+        return content, list(all_phones), list(all_emails)
 
     # ── Social & Reputation Search ───────────────────────────
 
@@ -449,7 +512,7 @@ class SyndicIntelligence:
             if cached:
                 return cached
 
-        website_content = self.scrape_website(domain)
+        website_content, scraped_phones, scraped_emails = self.scrape_website(domain)
         social_links = self.search_social_presence(name, city)
         reviews_data = self.search_reputation(name)
         apollo_contacts = self._fetch_apollo_contacts(domain, name)
@@ -473,6 +536,8 @@ class SyndicIntelligence:
             "apollo_contacts_json": apollo_contacts,
             "llm_analysis_json": llm_analysis,
             "llm_model_used": "gpt-4o-mini",
+            "scraped_phones": scraped_phones,
+            "scraped_emails": scraped_emails,
         }
 
         self.save_to_cache(result)
