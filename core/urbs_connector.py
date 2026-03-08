@@ -3,12 +3,19 @@ from datetime import datetime
 
 import requests
 import streamlit as st
+from google.cloud import bigquery
 
-from core.data_manager import get_bigquery_client
-
+PROJECT_ID = "gen-lang-client-0045947309"
 URBS_BASE_URL = "https://api.urbs.fr"
 URBS_ATTRIBUTES = "chauffageurbs,energieurbs,jannatmin,dpeurbs"
 URBS_TABLE = "gen-lang-client-0045947309.rnic.urbs_building_data"
+
+
+def _get_bq_client():
+    if "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
+        info = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
+        return bigquery.Client.from_service_account_info(info)
+    return bigquery.Client(project=PROJECT_ID)
 
 
 def _get_urbs_key():
@@ -19,7 +26,7 @@ def _get_urbs_key():
 
 
 def init_urbs_table():
-    client = get_bigquery_client()
+    client = _get_bq_client()
     try:
         client.query(f"""
             CREATE TABLE IF NOT EXISTS `{URBS_TABLE}` (
@@ -42,7 +49,7 @@ def get_urbs_from_db(numero_immat):
     """Load cached URBS data for a copro from BigQuery."""
     if not numero_immat:
         return None
-    client = get_bigquery_client()
+    client = _get_bq_client()
     try:
         safe = numero_immat.replace("'", "\\'")
         df = client.query(
@@ -67,7 +74,7 @@ def save_urbs_to_db(numero_immat, address, imope_id, data):
     """Persist URBS data in BigQuery (upsert via DELETE + INSERT)."""
     if not numero_immat or not data:
         return
-    client = get_bigquery_client()
+    client = _get_bq_client()
     try:
         safe = numero_immat.replace("'", "\\'")
         client.query(
