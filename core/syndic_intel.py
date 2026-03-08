@@ -933,15 +933,21 @@ class SyndicIntelligence:
         _status(f"[4/7] Scraping du site {domain or 'N/A'}...")
         website_content, scraped_phones, scraped_emails, team_pages_text = self.scrape_website(domain)
         _status(f"[4/7] Scraping : {len(website_content)} chars, {len(scraped_phones)} tél, {len(scraped_emails)} emails, {len(team_pages_text)} pages équipe")
+        for tp in team_pages_text:
+            tp_url = tp.split("\n")[0] if "\n" in tp else tp[:80]
+            _status(f"  → Page équipe : {tp_url}")
 
-        # 4b. LLM contact extraction from team pages
+        # 4b. LLM contact extraction from team pages (fallback to full content)
         scraped_contacts = []
         if team_pages_text:
             _status(f"[4b] Extraction LLM de contacts depuis {len(team_pages_text)} pages équipe/contact...")
             scraped_contacts = self._extract_contacts_with_llm(team_pages_text)
             _status(f"[4b] {len(scraped_contacts)} contacts extraits par LLM")
-        else:
-            _status("[4b] Aucune page équipe/contact détectée, extraction LLM ignorée")
+        if not scraped_contacts and website_content:
+            _status("[4b] Fallback : extraction LLM depuis le contenu complet du site...")
+            fallback_text = [f"[CONTENU COMPLET DU SITE]\n{website_content[:16000]}"]
+            scraped_contacts = self._extract_contacts_with_llm(fallback_text)
+            _status(f"[4b] Fallback : {len(scraped_contacts)} contacts extraits par LLM")
 
         # 5. Social presence
         _status("[5/7] Recherche présence réseaux sociaux...")
