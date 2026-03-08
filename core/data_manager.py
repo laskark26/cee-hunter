@@ -234,6 +234,51 @@ def fetch_data_by_syndic(syndic_name, climate_zones, min_lots, max_lots, periods
         st.error(f"Error fetching details for syndic: {e}")
         return pd.DataFrame()
 
+def count_matching_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None):
+    """Lightweight COUNT query for live preview of matching syndics."""
+    client = get_bigquery_client()
+    where_clause, zone_case = build_filter_clause(
+        climate_zones, min_lots, max_lots, periods,
+        exclude_big_syndics, qpv_only, regions=regions, departments=departments,
+    )
+    query = f"""
+        SELECT COUNT(DISTINCT raison_sociale_du_representant_legal) as cnt
+        FROM `{DATASET_TABLE}`
+        WHERE raison_sociale_du_representant_legal IS NOT NULL
+          AND {where_clause}
+    """
+    try:
+        df = client.query(query).to_dataframe()
+        return int(df.iloc[0]["cnt"]) if not df.empty else 0
+    except Exception:
+        return -1
+
+
+def fetch_all_data_by_syndic(syndic_name):
+    """Fetch ALL copros for a syndic without any filter (for 'Tout le parc' tab)."""
+    client = get_bigquery_client()
+    safe_syndic = syndic_name.replace("'", "\\'")
+    query = f"""
+        SELECT *
+        FROM `{DATASET_TABLE}`
+        WHERE raison_sociale_du_representant_legal = '{safe_syndic}'
+        ORDER BY CAST(nombre_de_lots_a_usage_d_habitation AS INT64) DESC
+    """
+    try:
+        df = client.query(query).to_dataframe()
+        if not df.empty:
+            df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+            df['long'] = pd.to_numeric(df['long'], errors='coerce')
+            df['nombre_de_lots_a_usage_d_habitation'] = pd.to_numeric(
+                df['nombre_de_lots_a_usage_d_habitation'], errors='coerce'
+            ).fillna(0)
+            df = df.dropna(subset=['lat', 'long'])
+        return df
+    except Exception as e:
+        st.error(f"Error fetching full portfolio: {e}")
+        return pd.DataFrame()
+
+
 def dry_run():
     client = get_bigquery_client()
     try:

@@ -1,6 +1,6 @@
-# Streamlit
-.streamlit/
-! .streamlit/config.toml
+# Streamlit — ignore secrets, keep config
+.streamlit/*
+!.streamlit/config.toml
 
 # Python
 __pycache__/

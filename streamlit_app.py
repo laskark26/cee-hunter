@@ -1,128 +1,67 @@
 import streamlit as st
 import pandas as pd
-import pydeck as pdk
-from core.data_manager import fetch_aggregated_syndics, fetch_data_by_syndic, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES
-import base64
-
-# Page Configuration
-st.set_page_config(
-    page_title="CEE Hunter v1 - Prospecting Dashboard",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+import json
+from core.data_manager import (
+    fetch_aggregated_syndics, fetch_data_by_syndic, fetch_all_data_by_syndic,
+    count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES,
+)
+from styles import generate_css, get_theme, score_color, PALETTE
+from components import (
+    render_header, render_stepper, render_kpi_card, render_score_gauge,
+    render_info_card, render_contact_card_html, render_copro_card,
+    render_empty_state, render_skeleton, render_chips, render_section_label,
+    render_divider, score_tag_html, maturite_tag_html, PERIOD_LABELS,
 )
 
-# --- CSS TO HIDE SIDEBAR COMPLETELY ---
-st.markdown("""
-<style>
-    [data-testid="stSidebar"] { display: none !important; }
-    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
-# --- SECURITY: LOGIN ---
+# ── Page Config ───────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="CEE Hunter PRO",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# ── Security: Login ───────────────────────────────────────────
+
 def check_password():
-    """Returns `True` if the user had the correct password."""
     def password_entered():
-        """Checks whether a password entered by the user is correct."""
         if st.session_state["password"] == st.secrets.get("APP_PASSWORD", "antigravity2026"):
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store password
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # First run, show input for password.
-        st.text_input(
-            "Mot de passe requis", type="password", on_change=password_entered, key="password"
-        )
-        st.info("💡 L'accès à cet outil est restreint.")
+        st.text_input("Mot de passe requis", type="password", on_change=password_entered, key="password")
+        st.info("L'accès à cet outil est restreint.")
         return False
     elif not st.session_state["password_correct"]:
-        # Password incorrect, show input + error.
-        st.text_input(
-            "Mot de passe requis", type="password", on_change=password_entered, key="password"
-        )
-        st.error("😕 Mot de passe incorrect")
+        st.text_input("Mot de passe requis", type="password", on_change=password_entered, key="password")
+        st.error("Mot de passe incorrect")
         return False
-    else:
-        # Password correct.
-        return True
+    return True
 
 if not check_password():
-    st.stop()  # Do not run the rest of the app
+    st.stop()
 
-# --- UTILITIES: SYNCHRONIZED FILTERS ---
-def synchronized_range_filter(label, key_prefix, min_val, max_val, default_val):
-    """Creates a range filter with a slider synchronized with two numeric inputs."""
-    slider_key = f"{key_prefix}_slider"
-    min_input_key = f"{key_prefix}_min_input"
-    max_input_key = f"{key_prefix}_max_input"
-    
-    # Initialize state if not present
-    if slider_key not in st.session_state:
-        st.session_state[slider_key] = default_val
-        st.session_state[min_input_key] = default_val[0]
-        st.session_state[max_input_key] = default_val[1]
+# ── Session State ─────────────────────────────────────────────
 
-    st.markdown(f"#### 🏘️ {label}")
-    
-    # Header with Numeric Inputs
-    c_min, c_max = st.columns(2)
-    
-    # Callback to sync slider from inputs
-    def sync_slider_from_inputs():
-        # Auto-fix: Ensure min <= max
-        v_min = st.session_state[min_input_key]
-        v_max = st.session_state[max_input_key]
-        if v_min > v_max:
-            st.session_state[max_input_key] = v_min
-            v_max = v_min
-        st.session_state[slider_key] = (v_min, v_max)
+defaults = {
+    "theme": "Light",
+    "theme_manually_set": False,
+    "current_step": 1,
+    "syndic_list": pd.DataFrame(),
+    "selected_syndic_data": pd.DataFrame(),
+    "current_syndic_name": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-    # Callback to sync inputs from slider
-    def sync_inputs_from_slider():
-        v_min, v_max = st.session_state[slider_key]
-        st.session_state[min_input_key] = v_min
-        st.session_state[max_input_key] = v_max
+# ── System Theme Detection ────────────────────────────────────
 
-    with c_min:
-        st.number_input(
-            "Min", min_value=min_val, max_value=max_val,
-            key=min_input_key, on_change=sync_slider_from_inputs,
-            label_visibility="collapsed"
-        )
-    with c_max:
-        st.number_input(
-            "Max", min_value=min_val, max_value=max_val,
-            key=max_input_key, on_change=sync_slider_from_inputs,
-            label_visibility="collapsed"
-        )
-
-    # Slider
-    st.slider(
-        label, min_value=min_val, max_value=max_val,
-        key=slider_key, on_change=sync_inputs_from_slider,
-        label_visibility="collapsed"
-    )
-    
-    return st.session_state[slider_key]
-
-# --- SESSION STATE MANAGEMENT ---
-if 'theme' not in st.session_state:
-    st.session_state['theme'] = 'Light' # Initial fallback
-if 'theme_manually_set' not in st.session_state:
-    st.session_state['theme_manually_set'] = False
-if 'current_step' not in st.session_state:
-    st.session_state['current_step'] = 1
-if 'syndic_list' not in st.session_state:
-    st.session_state['syndic_list'] = pd.DataFrame()
-if 'selected_syndic_data' not in st.session_state:
-    st.session_state['selected_syndic_data'] = pd.DataFrame()
-if 'current_syndic_name' not in st.session_state:
-    st.session_state['current_syndic_name'] = None
-
-# --- SYSTEM THEME DETECTION (One-time) ---
-if not st.session_state.get('theme_manually_set') and not st.session_state.get('system_theme_detected'):
+if not st.session_state.get("theme_manually_set") and not st.session_state.get("system_theme_detected"):
     from streamlit.components.v1 import html
     html("""
     <script>
@@ -134,155 +73,124 @@ if not st.session_state.get('theme_manually_set') and not st.session_state.get('
         }
     </script>
     """, height=0)
-    
-    detected = st.query_params.get('sys_theme')
+    detected = st.query_params.get("sys_theme")
     if detected:
-        st.session_state['theme'] = detected
-        st.session_state['system_theme_detected'] = True
+        st.session_state["theme"] = detected
+        st.session_state["system_theme_detected"] = True
         st.rerun()
 
-# --- NAVIGATION HELPERS ---
-def go_to_step(step_number):
-    st.session_state['current_step'] = step_number
+# ── Navigation ────────────────────────────────────────────────
+
+def go_to_step(n):
+    st.session_state["current_step"] = n
     st.rerun()
 
-# --- PREMIUM CSS STYLING ---
-theme_config = {
-    "Dark": {
-        "bg_color": "#0E1117",
-        "sidebar_bg": "#161B22", # Still used for stepper bg
-        "card_bg": "#1E232F",
-        "card_border": "#2D333F",
-        "text_color": "#F3F4F6",
-        "sub_text": "#9CA3AF",
-        "sep_color": "#262730",
-        "accent": "#10B981"
-    },
-    "Light": {
-        "bg_color": "#F8FAFC",
-        "sidebar_bg": "#FFFFFF",
-        "card_bg": "#FFFFFF",
-        "card_border": "#E2E8F0",
-        "text_color": "#1E293B",
-        "sub_text": "#64748B",
-        "sep_color": "#E2E8F0",
-        "accent": "#059669"
-    }
-}
+THEME = st.session_state["theme"]
+t = get_theme(THEME)
 
-c = theme_config[st.session_state['theme']]
+# ── Inject CSS ────────────────────────────────────────────────
 
-# --- HIGH-DENSITY CSS STYLING ---
-st.markdown(f"""
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-        html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
-        .stApp {{ background-color: {c['bg_color']}; color: {c['text_color']}; }}
-        
-        /* 60% Reduction in Vertical Spacing */
-        .block-container {{ padding-top: 60px !important; padding-bottom: 0rem !important; max-width: 1200px !important; }}
-        [data-testid="stVerticalBlock"] {{ gap: 0.25rem !important; }}
-        
-        /* Compact Header */
-        .header-compact {{
-            display: flex;
-            align-items: center;
-            padding-bottom: 0.5rem;
-            border-bottom: 1px solid {c['sep_color']};
-            margin-bottom: 0.5rem;
-        }}
-        .header-logo {{ font-size: 1.1rem; font-weight: 800; color: {c['accent']}; margin-right: 1rem; }}
-        .header-title {{ font-size: 0.85rem; color: {c['sub_text']}; font-weight: 400; flex-grow: 1; }}
+st.markdown(generate_css(THEME), unsafe_allow_html=True)
 
-        /* Theme Toggle Button Styling */
-        .stButton>button[kind="secondary"] {{
-            background: transparent;
-            border: none;
-            font-size: 1.2rem;
-            padding: 0;
-            margin: 0;
-            min-height: auto;
-            width: 32px;
-            height: 32px;
-        }}
+# ── Header + Stepper ──────────────────────────────────────────
 
-        /* Micro Stepper */
-        .micro-stepper {{
-            display: flex;
-            gap: 1.5rem;
-            justify-content: center;
-            background: {c['sidebar_bg']};
-            padding: 6px 16px;
-            border-radius: 8px;
-            border: 1px solid {c['card_border']};
-            margin-bottom: 0.75rem;
-        }}
-        .step-pill {{ font-size: 0.7rem; color: {c['sub_text']}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }}
-        .step-pill-active {{ color: {c['accent']}; }}
-        .step-dot {{ width: 5px; height: 5px; background: {c['card_border']}; border-radius: 50%; display: inline-block; margin-right: 5px; }}
-        .step-pill-active .step-dot {{ background: {c['accent']}; box-shadow: 0 0 8px {c['accent']}; }}
+render_header(THEME)
+render_stepper(st.session_state["current_step"])
 
-        /* Compact Cards */
-        .premium-card {{
-            background-color: {c['card_bg']};
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            border: 1px solid {c['card_border']};
-            margin-bottom: 0.25rem;
-        }}
-        
-        [data-testid="stMetric"] {{ padding: 0.25rem 0.5rem !important; }}
-        h1 {{ font-size: 1.1rem !important; margin: 0 !important; }}
-        h3 {{ font-size: 0.9rem !important; margin: 0.15rem 0 !important; }}
-        h4 {{ font-size: 0.8rem !important; margin: 0.1rem 0 !important; color: {c['sub_text']}; }}
-        .stCaption {{ font-size: 0.7rem !important; margin-bottom: 0.15rem !important; }}
-    </style>
-    """, unsafe_allow_html=True)
+# ── Synchronized Range Filter (utility) ───────────────────────
 
-# --- COMPACT HEADER WITH THEME TOGGLE ---
-h_col1, h_col2, h_col3 = st.columns([2, 5, 1])
-with h_col1:
-    st.markdown(f'<div class="header-logo">🎯 CEE HUNTER <span style="font-weight: 300; font-size: 0.75rem; color: {c["sub_text"]};">PRO</span></div>', unsafe_allow_html=True)
-with h_col2:
-    st.markdown(f'<div class="header-title" style="margin-top:4px;">Assistant de prospection intelligente</div>', unsafe_allow_html=True)
-with h_col3:
-    current_icon = "☀️" if st.session_state['theme'] == "Dark" else "🌙"
-    if st.button(current_icon, key="theme_toggle"):
-        st.session_state['theme'] = "Light" if st.session_state['theme'] == "Dark" else "Dark"
-        st.session_state['theme_manually_set'] = True
-        st.rerun()
+def synchronized_range_filter(label, key_prefix, min_val, max_val, default_val):
+    slider_key = f"{key_prefix}_slider"
+    min_input_key = f"{key_prefix}_min_input"
+    max_input_key = f"{key_prefix}_max_input"
 
-st.markdown(f'<div style="border-bottom: 1px solid {c["sep_color"]}; margin-bottom: 0.5rem;"></div>', unsafe_allow_html=True)
+    if slider_key not in st.session_state:
+        st.session_state[slider_key] = default_val
+        st.session_state[min_input_key] = default_val[0]
+        st.session_state[max_input_key] = default_val[1]
 
-# --- MICRO STEPPER ---
-s = st.session_state['current_step']
-st.markdown(f"""
-    <div class="micro-stepper">
-        <div class="step-pill {'step-pill-active' if s>=1 else ''}"><span class="step-dot"></span>CRITÈRES</div>
-        <div class="step-pill {'step-pill-active' if s>=2 else ''}"><span class="step-dot"></span>RÉSULTATS</div>
-        <div class="step-pill {'step-pill-active' if s>=3 else ''}"><span class="step-dot"></span>INTEL</div>
-        <div class="step-pill {'step-pill-active' if s>=4 else ''}"><span class="step-dot"></span>PACK</div>
-    </div>
-""", unsafe_allow_html=True)
+    render_section_label(f"🏘️ {label}")
 
-# --- STEP 1: GUIDED CRITERIA ---
-if st.session_state['current_step'] == 1:
-    col1, col2 = st.columns(2)
-    
-    with col1:
+    def sync_slider():
+        v_min = st.session_state[min_input_key]
+        v_max = st.session_state[max_input_key]
+        if v_min > v_max:
+            st.session_state[max_input_key] = v_min
+            v_max = v_min
+        st.session_state[slider_key] = (v_min, v_max)
+
+    def sync_inputs():
+        v_min, v_max = st.session_state[slider_key]
+        st.session_state[min_input_key] = v_min
+        st.session_state[max_input_key] = v_max
+
+    c_min, c_max = st.columns(2)
+    with c_min:
+        st.number_input("Min", min_value=min_val, max_value=max_val, key=min_input_key, on_change=sync_slider, label_visibility="collapsed")
+    with c_max:
+        st.number_input("Max", min_value=min_val, max_value=max_val, key=max_input_key, on_change=sync_slider, label_visibility="collapsed")
+    st.slider(label, min_value=min_val, max_value=max_val, key=slider_key, on_change=sync_inputs, label_visibility="collapsed")
+    return st.session_state[slider_key]
+
+
+# ══════════════════════════════════════════════════════════════
+# STEP 1 — CRITÈRES
+# ══════════════════════════════════════════════════════════════
+
+if st.session_state["current_step"] == 1:
+
+    # ── Presets ───────────────────────────────────────────────
+    render_section_label("Recherche rapide")
+    p1, p2, p3, _ = st.columns([1, 1, 1, 2])
+    with p1:
+        if st.button("🔥 Passoires IDF", use_container_width=True):
+            st.session_state["preset_zones"] = ["H1"]
+            st.session_state["preset_regions"] = ["Île-de-France"]
+            st.session_state["preset_periods"] = ["Avant 1949", "1949-1974"]
+            st.session_state["preset_lots"] = (20, 500)
+            st.rerun()
+    with p2:
+        if st.button("🏢 Grands parcs H1", use_container_width=True):
+            st.session_state["preset_zones"] = ["H1"]
+            st.session_state["preset_regions"] = []
+            st.session_state["preset_periods"] = ["Avant 1949", "1949-1974", "1975-1993"]
+            st.session_state["preset_lots"] = (100, 1000)
+            st.rerun()
+    with p3:
+        if st.button("📍 QPV prioritaires", use_container_width=True):
+            st.session_state["preset_zones"] = ["H1", "H2"]
+            st.session_state["preset_regions"] = []
+            st.session_state["preset_periods"] = ["Avant 1949", "1949-1974"]
+            st.session_state["preset_lots"] = (20, 500)
+            st.session_state["preset_qpv"] = True
+            st.rerun()
+
+    preset_zones = st.session_state.pop("preset_zones", None)
+    preset_regions = st.session_state.pop("preset_regions", None)
+    preset_periods = st.session_state.pop("preset_periods", None)
+    preset_lots = st.session_state.pop("preset_lots", None)
+    preset_qpv = st.session_state.pop("preset_qpv", None)
+
+    render_divider()
+
+    col_geo, col_build = st.columns(2)
+
+    # ── Geography ─────────────────────────────────────────────
+    with col_geo:
         with st.container(border=True):
-            st.markdown("#### 🌍 Zone & Période")
+            render_section_label("🌍 Géographie")
+
             selected_zones = st.multiselect(
                 "Zones Climatiques",
                 options=["H1", "H2", "H3"],
-                default=["H1"],
-                placeholder="Choisir zones..."
+                default=preset_zones or ["H1"],
+                placeholder="Choisir zones...",
             )
             selected_regions = st.multiselect(
                 "Régions",
                 options=sorted(REGIONS_DEPARTMENTS.keys()),
-                default=[],
-                placeholder="Toutes les régions..."
+                default=preset_regions if preset_regions is not None else [],
+                placeholder="Toutes les régions...",
             )
             if selected_regions:
                 available_depts = []
@@ -295,31 +203,75 @@ if st.session_state['current_step'] == 1:
                 "Départements",
                 options=dept_options,
                 default=[],
-                placeholder="Tous les départements..."
+                placeholder="Tous les départements...",
             )
             selected_departments = [lbl.split(" - ")[0] for lbl in selected_dept_labels]
+
+    # ── Building Characteristics ──────────────────────────────
+    with col_build:
+        with st.container(border=True):
+            render_section_label("🏗️ Caractéristiques")
+
             selected_periods = st.multiselect(
                 "Périodes de construction",
-                options=['Avant 1949', '1949-1974', '1975-1993', '1994-2000', '2001-2010', 'Après 2011'],
-                default=['Avant 1949', '1949-1974'],
-                placeholder="Choisir périodes..."
+                options=["Avant 1949", "1949-1974", "1975-1993", "1994-2000", "2001-2010", "Après 2011"],
+                default=preset_periods or ["Avant 1949", "1949-1974"],
+                placeholder="Choisir périodes...",
             )
 
-    with col2:
-        with st.container(border=True):
-            selected_lots = synchronized_range_filter(
-                "Nombre de lots (Habitation)",
-                "lots_filter", 0, 1000, (20, 500)
-            )
+            if preset_lots:
+                st.session_state["lots_filter_slider"] = preset_lots
+                st.session_state["lots_filter_min_input"] = preset_lots[0]
+                st.session_state["lots_filter_max_input"] = preset_lots[1]
+
+            selected_lots = synchronized_range_filter("Nombre de lots (Habitation)", "lots_filter", 0, 1000, (20, 500))
+
+            render_divider()
+            render_section_label("⚙️ Options avancées")
             c_opt1, c_opt2 = st.columns(2)
             with c_opt1:
-                exclude_big = st.checkbox("🚫 Exclure majors", value=True)
+                exclude_big = st.checkbox("Exclure majors (Foncia, Nexity...)", value=True)
             with c_opt2:
-                qpv_only = st.checkbox("📍 QPV Uniq.", value=False)
+                qpv_only = st.checkbox("QPV uniquement", value=preset_qpv or False)
 
-    if st.button("🚀 TROUVER LES SYNDICS", type="primary", use_container_width=True):
+    # ── Active Filters Chips ──────────────────────────────────
+    chips = []
+    for z in selected_zones:
+        chips.append(f"Zone {z}")
+    for r in selected_regions:
+        chips.append(r)
+    for p in selected_periods:
+        chips.append(p)
+    if selected_departments:
+        chips.append(f"{len(selected_departments)} dép.")
+    chips.append(f"{selected_lots[0]}-{selected_lots[1]} lots")
+    if exclude_big:
+        chips.append("Sans majors")
+    if qpv_only:
+        chips.append("QPV")
+    render_chips(chips)
+
+    # ── Live Count ────────────────────────────────────────────
+    live_count = count_matching_syndics(
+        climate_zones=selected_zones,
+        min_lots=selected_lots[0],
+        max_lots=selected_lots[1],
+        periods=selected_periods,
+        exclude_big_syndics=exclude_big,
+        qpv_only=qpv_only,
+        regions=selected_regions,
+        departments=selected_departments,
+    )
+    if live_count >= 0:
+        st.markdown(
+            f'<div class="cee-live-count"><span class="dot"></span> ~{live_count:,} syndics correspondent à vos critères</div>'.replace(",", " "),
+            unsafe_allow_html=True,
+        )
+
+    # ── CTA ───────────────────────────────────────────────────
+    if st.button("TROUVER LES SYNDICS", type="primary", use_container_width=True):
         with st.spinner("Analyse du gisement en cours..."):
-            st.session_state['syndic_list'] = fetch_aggregated_syndics(
+            st.session_state["syndic_list"] = fetch_aggregated_syndics(
                 climate_zones=selected_zones,
                 min_lots=selected_lots[0],
                 max_lots=selected_lots[1],
@@ -327,107 +279,161 @@ if st.session_state['current_step'] == 1:
                 exclude_big_syndics=exclude_big,
                 qpv_only=qpv_only,
                 regions=selected_regions,
-                departments=selected_departments
+                departments=selected_departments,
             )
-            # Store filters for reuse in step 2
-            st.session_state['filters'] = {
-                'zones': selected_zones,
-                'regions': selected_regions,
-                'departments': selected_departments,
-                'lots': selected_lots,
-                'periods': selected_periods,
-                'exclude_big': exclude_big,
-                'qpv': qpv_only
+            st.session_state["filters"] = {
+                "zones": selected_zones,
+                "regions": selected_regions,
+                "departments": selected_departments,
+                "lots": selected_lots,
+                "periods": selected_periods,
+                "exclude_big": exclude_big,
+                "qpv": qpv_only,
             }
             go_to_step(2)
-# --- STEP 2: RESULTS TABLE ---
-elif st.session_state['current_step'] == 2:
-    col_back, col_kpis = st.columns([1, 4])
-    with col_back:
-        if st.button("⬅️ Critères", key="back_to_1"):
-            go_to_step(1)
-    
-    df_agg = st.session_state['syndic_list']
-    
-    if df_agg.empty:
-        st.warning("Aucun résultat.")
-    else:
-        with col_kpis:
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Syndics", f"{len(df_agg)}")
-            k2.metric("Immeubles", f"{int(df_agg['nb_copros'].sum())}")
-            k3.metric("Lots", f"{int(df_agg['total_lots'].sum())}")
-        
-        df_display = df_agg[["Syndic", "Siret", "nb_copros", "total_lots"]].rename(columns={
-            "nb_copros": "Immeubles", "total_lots": "Lots"
-        })
 
+
+# ══════════════════════════════════════════════════════════════
+# STEP 2 — RÉSULTATS
+# ══════════════════════════════════════════════════════════════
+
+elif st.session_state["current_step"] == 2:
+    col_back, _ = st.columns([1, 5])
+    with col_back:
+        if st.button("← Modifier les critères", key="back_to_1"):
+            go_to_step(1)
+
+    df_agg = st.session_state["syndic_list"]
+
+    if df_agg.empty:
+        render_empty_state("Aucun résultat", "Modifiez vos critères et relancez la recherche.", "🔍")
+    else:
+        # ── KPI Bar ───────────────────────────────────────────
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            render_kpi_card("Syndics", f"{len(df_agg):,}".replace(",", " "), primary=True)
+        with k2:
+            render_kpi_card("Immeubles", f"{int(df_agg['nb_copros'].sum()):,}".replace(",", " "))
+        with k3:
+            render_kpi_card("Lots", f"{int(df_agg['total_lots'].sum()):,}".replace(",", " "))
+
+        st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
+
+        # ── Search Bar ────────────────────────────────────────
+        search_query = st.text_input("🔍 Rechercher un syndic...", placeholder="Nom du syndic...", label_visibility="collapsed")
+
+        df_display = df_agg[["Syndic", "Siret", "nb_copros", "total_lots"]].rename(
+            columns={"nb_copros": "Immeubles", "total_lots": "Lots"}
+        )
+
+        if search_query:
+            mask = df_display["Syndic"].str.contains(search_query, case=False, na=False)
+            df_display = df_display[mask]
+            st.caption(f"{len(df_display)} résultat(s) pour « {search_query} »")
+
+        # ── Results Table ─────────────────────────────────────
         event = st.dataframe(
-            df_display, use_container_width=True,
+            df_display,
+            use_container_width=True,
             column_config={
                 "Syndic": st.column_config.TextColumn("Nom du Syndic", width="large"),
                 "Siret": st.column_config.TextColumn("SIRET", width="small"),
-                "Immeubles": st.column_config.NumberColumn("🏢", format="%d"),
-                "Lots": st.column_config.ProgressColumn("🏠 Total", format="%d", min_value=0, max_value=int(df_agg['total_lots'].max())),
+                "Immeubles": st.column_config.NumberColumn("Immeubles", format="%d"),
+                "Lots": st.column_config.ProgressColumn(
+                    "Lots", format="%d", min_value=0,
+                    max_value=int(df_agg["total_lots"].max()) if not df_agg.empty else 100,
+                ),
             },
-            selection_mode="single-row", on_select="rerun", hide_index=True, height=400
+            selection_mode="single-row",
+            on_select="rerun",
+            hide_index=True,
+            height=450,
         )
-        
-        if len(event.selection['rows']) > 0:
-            selected_index = event.selection['rows'][0]
-            selected_row = df_agg.iloc[selected_index]
-            st.session_state['selected_syndic_row'] = selected_row
+
+        # ── Pagination Info ───────────────────────────────────
+        st.caption(f"Affichage de {len(df_display)} syndics sur {len(df_agg)} résultats")
+
+        if len(event.selection["rows"]) > 0:
+            selected_index = event.selection["rows"][0]
+            if search_query:
+                selected_row = df_agg[df_agg["Syndic"].str.contains(search_query, case=False, na=False)].iloc[selected_index]
+            else:
+                selected_row = df_agg.iloc[selected_index]
+            st.session_state["selected_syndic_row"] = selected_row
             go_to_step(3)
 
-# --- STEP 3: SYNDIC DETAILS ---
-elif st.session_state['current_step'] == 3:
-    syndic_row = st.session_state.get('selected_syndic_row')
-    if syndic_row is None: go_to_step(2)
-        
-    syndic_name, syndic_siret = syndic_row['Syndic'], syndic_row['Siret']
-    
+
+# ══════════════════════════════════════════════════════════════
+# STEP 3 — INTEL
+# ══════════════════════════════════════════════════════════════
+
+elif st.session_state["current_step"] == 3:
+    syndic_row = st.session_state.get("selected_syndic_row")
+    if syndic_row is None:
+        go_to_step(2)
+
+    syndic_name = syndic_row["Syndic"]
+    syndic_siret = syndic_row["Siret"]
+
     col_back, col_title = st.columns([1, 6])
     with col_back:
-        if st.button("⬅️ Liste", key="back_to_2"): go_to_step(2)
+        if st.button("← Liste", key="back_to_2"):
+            go_to_step(2)
     with col_title:
-        st.markdown(f"#### {syndic_name}")
+        st.markdown(f"### {syndic_name}")
 
     from core.pappers_connector import get_syndic_info
     pappers_info = get_syndic_info(syndic_siret)
 
-    filters = st.session_state.get('filters', {})
-    if st.session_state['current_syndic_name'] != syndic_name:
-        st.session_state['selected_syndic_data'] = fetch_data_by_syndic(
-            syndic_name, filters.get('zones', ['H1']), filters.get('lots', (0, 1000))[0], filters.get('lots', (0, 1000))[1],
-            periods=filters.get('periods'), exclude_big_syndics=filters.get('exclude_big', True), qpv_only=filters.get('qpv', False),
-            regions=filters.get('regions'), departments=filters.get('departments')
+    filters = st.session_state.get("filters", {})
+    if st.session_state["current_syndic_name"] != syndic_name:
+        st.session_state["selected_syndic_data"] = fetch_data_by_syndic(
+            syndic_name,
+            filters.get("zones", ["H1"]),
+            filters.get("lots", (0, 1000))[0],
+            filters.get("lots", (0, 1000))[1],
+            periods=filters.get("periods"),
+            exclude_big_syndics=filters.get("exclude_big", True),
+            qpv_only=filters.get("qpv", False),
+            regions=filters.get("regions"),
+            departments=filters.get("departments"),
         )
-        st.session_state['current_syndic_name'] = syndic_name
-        
-    tab_intel, tab_contacts, tab_parc = st.tabs(["🕵️ Intelligence", "👥 Contacts", "🏢 Parc Immobilier"])
+        st.session_state["current_syndic_name"] = syndic_name
+
+    tab_intel, tab_contacts, tab_parc_cible, tab_parc_all = st.tabs([
+        "🕵️ Intelligence", "👥 Contacts", "🎯 Parc ciblé", "🏢 Tout le parc"
+    ])
+
+    # ──────────────────────────────────────────────────────────
+    # TAB: Intelligence
+    # ──────────────────────────────────────────────────────────
 
     with tab_intel:
         from core.syndic_intel import SyndicIntelligence
         from core.enrichment_manager import EnrichmentManager
-        import json
 
         intel_engine = SyndicIntelligence()
         enricher = EnrichmentManager()
 
-        # Fiche entreprise (Pappers)
-        st.markdown(f"""
-            <div class="premium-card">
-                <p style="font-size:0.8rem; margin:0;"><b>Dirigeant :</b> {pappers_info.get('prenom_dirigeant', '')} {pappers_info.get('nom_dirigeant', '')}</p>
-                <p style="font-size:0.8rem; margin:0;"><b>CA :</b> {f"{pappers_info.get('ca_annuel', 0)/1000000:.1f} M€" if pappers_info.get('ca_annuel') else 'N/A'}
-                    &nbsp;•&nbsp; <b>Catégorie :</b> {pappers_info.get('categorie_entreprise', 'N/A')}
-                    &nbsp;•&nbsp; <b>APE :</b> {pappers_info.get('code_ape', 'N/A')}</p>
-                <p style="font-size:0.75rem; color:{c['sub_text']}; margin:0;">
-                    📞 {pappers_info.get('telephone', 'N/A')} &nbsp;•&nbsp; 📧 {pappers_info.get('email', 'N/A')}
-                    &nbsp;•&nbsp; 🌐 {pappers_info.get('sites_internet', 'N/A')}</p>
-            </div>
-        """, unsafe_allow_html=True)
+        # ── Company Card (Pappers) ────────────────────────────
+        dirigeant = f"{pappers_info.get('prenom_dirigeant', '')} {pappers_info.get('nom_dirigeant', '')}".strip()
+        ca = pappers_info.get("ca_annuel")
+        ca_str = f"{ca / 1_000_000:.1f} M€" if ca else "—"
+        cat = pappers_info.get("categorie_entreprise") or "—"
+        ape = pappers_info.get("code_ape") or "—"
+        tel_p = pappers_info.get("telephone") or "—"
+        email_p = pappers_info.get("email") or "—"
+        web_p = pappers_info.get("sites_internet") or "—"
 
-        # Intelligence IA
+        render_info_card(
+            "Fiche entreprise",
+            f'<p style="margin:0 0 4px 0;"><strong>Dirigeant</strong> : {dirigeant or "—"}</p>'
+            f'<p style="margin:0 0 4px 0;"><strong>CA</strong> : {ca_str} · <strong>Catégorie</strong> : {cat} · <strong>APE</strong> : {ape}</p>'
+            f'<p style="margin:0;font-size:12px;color:{t["text_secondary"]};">📞 {tel_p} · 📧 {email_p} · 🌐 {web_p}</p>',
+            icon="🏛️",
+        )
+
+        # ── Intelligence Data ─────────────────────────────────
         intel_key = f"intel_data_{syndic_siret}"
         if intel_key not in st.session_state:
             cached_intel = intel_engine.get_cached_intel(syndic_siret)
@@ -437,22 +443,9 @@ elif st.session_state['current_step'] == 3:
         intel_data = st.session_state.get(intel_key)
 
         if not intel_data:
-            st.markdown("")
-            col_btn, col_refresh = st.columns([3, 1])
-            with col_btn:
-                if st.button("🔬 Lancer l'Intelligence", type="primary", use_container_width=True):
-                    status_box = st.empty()
-                    progress_log = []
-
-                    def on_status(msg):
-                        progress_log.append(msg)
-                        status_box.markdown(
-                            '<div class="premium-card" style="font-family:monospace; font-size:0.75rem; line-height:1.5; max-height:200px; overflow-y:auto;">'
-                            + '<br>'.join(f'<span style="color:{c["accent"]};">▸</span> {m}' for m in progress_log)
-                            + '</div>',
-                            unsafe_allow_html=True
-                        )
-
+            render_divider()
+            if st.button("🔬 Lancer l'Intelligence", type="primary", use_container_width=True):
+                with st.spinner("Analyse en cours... Scraping, réseaux sociaux, IA..."):
                     enrich_key = f"enrich_data_{syndic_siret}"
                     if enrich_key not in st.session_state:
                         cached_enrich = enricher.get_cached_data(syndic_siret)
@@ -467,20 +460,18 @@ elif st.session_state['current_step'] == 3:
                         if sites:
                             domain = sites.split(",")[0].strip().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
 
-                    city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
+                    city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
                     result = intel_engine.run_intelligence(
-                        siret=syndic_siret,
-                        name=syndic_name,
-                        city=city,
-                        domain=domain,
+                        siret=syndic_siret, name=syndic_name, city=city, domain=domain,
                         pappers_data=pappers_info,
-                        nb_copros=int(syndic_row.get('nb_copros', 0)),
-                        total_lots=int(syndic_row.get('total_lots', 0)),
-                        status_callback=on_status,
+                        nb_copros=int(syndic_row.get("nb_copros", 0)),
+                        total_lots=int(syndic_row.get("total_lots", 0)),
                     )
                     if result:
                         st.session_state[intel_key] = result
                         st.rerun()
+            else:
+                render_empty_state("Intelligence non lancée", "Cliquez sur le bouton ci-dessus pour analyser ce syndic.", "🔬")
         else:
             analysis = intel_data.get("llm_analysis_json", {})
             if isinstance(analysis, str):
@@ -489,273 +480,181 @@ elif st.session_state['current_step'] == 3:
                 except Exception:
                     analysis = {}
 
-            # —— 1. KPIs (ligne unique, 3 blocs) ——
+            # ── Score + KPIs Row ──────────────────────────────
             score = analysis.get("score_prospection", "?")
-            score_color = "#10B981" if isinstance(score, (int, float)) and score >= 7 else "#F59E0B" if isinstance(score, (int, float)) and score >= 4 else "#6B7280"
             maturite = (analysis.get("maturite_digitale") or "").strip() or "—"
-            maturite_color = "#10B981" if maturite == "forte" else "#F59E0B" if maturite == "moyenne" else "#EF4444" if maturite == "faible" else c["sub_text"]
             taille = (analysis.get("taille_estimee") or "").strip() or "—"
 
-            kpi1, kpi2, kpi3 = st.columns(3)
-            with kpi1:
-                st.markdown(f"""<div class="premium-card" style="text-align:center;">
-                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">Score prospection</p>
-                    <p style="font-size:1.6rem; font-weight:800; margin:0; color:{score_color};">{score}/10</p>
-                </div>""", unsafe_allow_html=True)
-            with kpi2:
-                st.markdown(f"""<div class="premium-card" style="text-align:center;">
-                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">Maturité digitale</p>
-                    <p style="font-size:0.95rem; font-weight:700; margin:0.2rem 0 0 0; color:{maturite_color};">{str(maturite).upper()}</p>
-                </div>""", unsafe_allow_html=True)
-            with kpi3:
-                st.markdown(f"""<div class="premium-card" style="text-align:center;">
-                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">Taille estimée</p>
-                    <p style="font-size:0.95rem; font-weight:700; margin:0.2rem 0 0 0;">{taille}</p>
-                </div>""", unsafe_allow_html=True)
+            col_gauge, col_kpis = st.columns([1, 2])
+            with col_gauge:
+                render_score_gauge(score)
+                st.markdown(
+                    '<p class="cee-gauge-hint">Basé sur : taille du parc, maturité digitale, présence web, accessibilité contacts</p>',
+                    unsafe_allow_html=True,
+                )
+            with col_kpis:
+                kc1, kc2 = st.columns(2)
+                with kc1:
+                    st.markdown(
+                        f'<div class="cee-card" style="text-align:center;">'
+                        f'<p class="cee-card-title">Maturité digitale</p>'
+                        f'<div style="margin-top:4px;">{maturite_tag_html(maturite)}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                with kc2:
+                    st.markdown(
+                        f'<div class="cee-card" style="text-align:center;">'
+                        f'<p class="cee-card-title">Taille estimée</p>'
+                        f'<p style="font-size:16px;font-weight:700;margin:4px 0 0 0;">{taille}</p>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                # Contact info from scraping
+                tel_principal = analysis.get("telephone_principal", "") or ""
+                email_principal = analysis.get("email_principal", "") or ""
+                scraped_phones = intel_data.get("scraped_phones", [])
+                scraped_emails = intel_data.get("scraped_emails", [])
+                if isinstance(scraped_phones, str):
+                    try: scraped_phones = json.loads(scraped_phones)
+                    except Exception: scraped_phones = []
+                if isinstance(scraped_emails, str):
+                    try: scraped_emails = json.loads(scraped_emails)
+                    except Exception: scraped_emails = []
 
-            # —— 2. Coordonnées (tél / email) ——
-            tel_principal = analysis.get("telephone_principal", "") or ""
-            email_principal = analysis.get("email_principal", "") or ""
-            scraped_phones = intel_data.get("scraped_phones", [])
-            scraped_emails = intel_data.get("scraped_emails", [])
-            if isinstance(scraped_phones, str):
-                try: scraped_phones = json.loads(scraped_phones)
-                except Exception: scraped_phones = []
-            if isinstance(scraped_emails, str):
-                try: scraped_emails = json.loads(scraped_emails)
-                except Exception: scraped_emails = []
+                has_contact = tel_principal or email_principal or scraped_phones or scraped_emails
+                if has_contact:
+                    parts = []
+                    if tel_principal:
+                        parts.append(f"📞 <strong>{tel_principal}</strong>")
+                    for p in (scraped_phones or [])[:1]:
+                        if p and p != (tel_principal or "").replace(" ", "").replace(".", ""):
+                            parts.append(f"📞 {p} <small>(site)</small>")
+                    if email_principal:
+                        parts.append(f"📧 <strong>{email_principal}</strong>")
+                    for e in (scraped_emails or [])[:1]:
+                        if e and e != (email_principal or "").lower():
+                            parts.append(f"📧 {e} <small>(site)</small>")
+                    render_info_card("Coordonnées vérifiées", " · ".join(parts), icon="📇")
 
-            has_contact_info = tel_principal or email_principal or scraped_phones or scraped_emails
-            if has_contact_info:
-                contact_lines = []
-                if tel_principal:
-                    contact_lines.append(f"Tél : <b>{tel_principal}</b>")
-                for p in (scraped_phones or []):
-                    if p and p != (tel_principal or "").replace(" ", "").replace(".", ""):
-                        contact_lines.append(f"Tél (site) : {p}")
-                        break
-                if email_principal:
-                    contact_lines.append(f"Email : <b>{email_principal}</b>")
-                for e in (scraped_emails or [])[:2]:
-                    if e and e != (email_principal or "").lower():
-                        contact_lines.append(f"Email (site) : {e}")
-                        break
-                contact_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.35rem 0;">Coordonnées</p><p style="font-size:0.8rem; margin:0; line-height:1.4;">' + " &nbsp;·&nbsp; ".join(contact_lines) + '</p></div>'
-                st.markdown(contact_html, unsafe_allow_html=True)
-
-            # —— 3. Résumé + Angle d'approche ——
+            # ── Summary + Approach ────────────────────────────
             resume = (analysis.get("resume_activite") or "").strip()
             angle = (analysis.get("angle_approche_recommande") or "").strip()
             if resume:
-                st.markdown(f"""<div class="premium-card">
-                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Résumé</p>
-                    <p style="font-size:0.8rem; margin:0; line-height:1.35;">{resume}</p>
-                </div>""", unsafe_allow_html=True)
+                render_info_card("Résumé", resume, icon="📝")
             if angle:
-                st.markdown(f"""<div class="premium-card" style="border-left:3px solid {c['accent']};">
-                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Angle d'approche recommandé</p>
-                    <p style="font-size:0.8rem; margin:0; line-height:1.35;">{angle}</p>
-                </div>""", unsafe_allow_html=True)
+                render_info_card("Angle d'approche recommandé", angle, accent_border=True, icon="🎯")
 
-            # —— 4. Points forts | Points faibles (masquer "Analyse LLM indisponible" seul) ——
+            # ── Strengths / Weaknesses ────────────────────────
             points_forts = [x for x in (analysis.get("points_forts") or []) if isinstance(x, str) and x.strip()]
             points_faibles = [x for x in (analysis.get("points_faibles") or []) if isinstance(x, str) and x.strip() and "LLM indisponible" not in x]
             if points_forts or points_faibles:
                 col_pf, col_pw = st.columns(2)
                 with col_pf:
                     if points_forts:
-                        pf_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Points forts</p>'
-                        for pf in points_forts:
-                            pf_html += f'<p style="font-size:0.78rem; margin:0.1rem 0;">· {pf}</p>'
-                        pf_html += '</div>'
-                        st.markdown(pf_html, unsafe_allow_html=True)
+                        items = "".join(f'<p style="font-size:13px;margin:3px 0;">✅ {pf}</p>' for pf in points_forts)
+                        render_info_card("Points forts", items, icon="💪")
                 with col_pw:
                     if points_faibles:
-                        pw_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Points faibles</p>'
-                        for pw in points_faibles:
-                            pw_html += f'<p style="font-size:0.78rem; margin:0.1rem 0;">· {pw}</p>'
-                        pw_html += '</div>'
-                        st.markdown(pw_html, unsafe_allow_html=True)
+                        items = "".join(f'<p style="font-size:13px;margin:3px 0;">⚠️ {pw}</p>' for pw in points_faibles)
+                        render_info_card("Points faibles", items, icon="🔻")
 
-            # —— 5. Présence Web (seulement si au moins une URL) ——
+            # ── Web Presence ──────────────────────────────────
             socials = analysis.get("reseaux_sociaux") or {}
-            has_social_urls = any(isinstance(v, dict) and v.get("url") for v in socials.values())
-            if has_social_urls:
-                social_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Présence web</p>'
+            has_social = any(isinstance(v, dict) and v.get("url") for v in socials.values())
+            if has_social:
+                social_parts = []
                 for platform, info in socials.items():
-                    if not isinstance(info, dict):
+                    if not isinstance(info, dict) or not info.get("url"):
                         continue
-                    url = info.get("url", "")
-                    if not url:
-                        continue
+                    url = info["url"]
                     label = platform.replace("_", " ").title()
                     actif = info.get("actif", False)
-                    dot = "●" if actif else "○"
-                    social_html += f'<p style="font-size:0.78rem; margin:0.15rem 0;">{dot} <b>{label}</b> <a href="{url}" target="_blank" rel="noopener" style="color:{c["accent"]};">{url[:45]}{"…" if len(url)>45 else ""}</a></p>'
-                social_html += '</div>'
-                st.markdown(social_html, unsafe_allow_html=True)
+                    dot = "🟢" if actif else "⚪"
+                    social_parts.append(
+                        f'<p style="font-size:13px;margin:3px 0;">{dot} <strong>{label}</strong> '
+                        f'<a href="{url}" target="_blank" style="color:{t["accent"]};text-decoration:none;">'
+                        f'{url[:50]}{"…" if len(url) > 50 else ""}</a></p>'
+                    )
+                render_info_card("Présence web", "".join(social_parts), icon="🌐")
 
-            # —— 6. Réputation (si présente) ——
+            # ── Reputation ────────────────────────────────────
             reputation = (analysis.get("reputation_en_ligne") or "").strip()
             if reputation and reputation.lower() not in ("non analysée", "aucun avis trouvé"):
-                st.markdown(f"""<div class="premium-card">
-                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Réputation en ligne</p>
-                    <p style="font-size:0.8rem; margin:0; line-height:1.35;">{reputation}</p>
-                </div>""", unsafe_allow_html=True)
+                render_info_card("Réputation en ligne", reputation, icon="⭐")
 
-            # —— 7. Contacts clés (prospection CEE) ——
-            contacts_cles = [x for x in (analysis.get("contacts_cles") or []) if isinstance(x, dict) and (x.get("nom") or x.get("email") or x.get("telephone"))]
+            # ── Key Contacts from LLM ─────────────────────────
+            contacts_cles = [x for x in (analysis.get("contacts_cles") or []) if isinstance(x, dict) and (x.get("nom") or x.get("email"))]
             if contacts_cles:
-                ck_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.35rem 0;">Contacts clés (prospection CEE)</p>'
+                ck_parts = []
                 for ck in contacts_cles[:5]:
                     nom = (ck.get("nom") or "").strip() or "—"
                     poste = (ck.get("poste") or "").strip()
                     ck_email = (ck.get("email") or "").strip()
                     ck_tel = (ck.get("telephone") or "").strip()
                     ck_li = (ck.get("linkedin") or "").strip()
-                    ck_html += f'<div style="border-top:1px solid {c["card_border"]}; padding:0.35rem 0; margin-top:0.2rem;">'
-                    ck_html += f'<p style="font-size:0.8rem; margin:0;"><b>{nom}</b>' + (f' — {poste}' if poste else '') + '</p>'
-                    parts = []
+                    line = f'<strong>{nom}</strong>'
+                    if poste:
+                        line += f' — {poste}'
+                    details = []
                     if ck_email:
-                        parts.append(f'📧 {ck_email}')
+                        details.append(f"📧 {ck_email}")
                     if ck_tel:
-                        parts.append(f'📞 {ck_tel}')
+                        details.append(f"📞 {ck_tel}")
                     if ck_li:
-                        parts.append(f'<a href="{ck_li}" target="_blank" rel="noopener" style="color:{c["accent"]};">LinkedIn</a>')
-                    if parts:
-                        ck_html += f'<p style="font-size:0.72rem; margin:0.15rem 0 0 0; color:{c["sub_text"]};">{" · ".join(parts)}</p>'
+                        details.append(f'<a href="{ck_li}" target="_blank" style="color:{t["accent"]};">LinkedIn</a>')
+                    if details:
+                        line += f'<br><span style="font-size:12px;color:{t["text_secondary"]};">{" · ".join(details)}</span>'
                     pertinence = (ck.get("pertinence_cee") or "").strip()
                     if pertinence:
-                        ck_html += f'<p style="font-size:0.7rem; margin:0.1rem 0 0 0; color:{c["sub_text"]}; font-style:italic;">{pertinence}</p>'
-                    ck_html += '</div>'
-                ck_html += '</div>'
-                st.markdown(ck_html, unsafe_allow_html=True)
+                        line += f'<br><span style="font-size:11px;color:{t["text_tertiary"]};font-style:italic;">{pertinence}</span>'
+                    ck_parts.append(f'<div style="padding:8px 0;border-top:1px solid {t["separator"]};">{line}</div>')
+                render_info_card("Contacts clés (prospection CEE)", "".join(ck_parts), icon="👥")
 
-            # —— 8. Services & Zones (une ligne si présents) ——
+            # ── Services & Zones ──────────────────────────────
             services = [s for s in (analysis.get("services_proposes") or []) if isinstance(s, str) and s.strip()]
             zones = [z for z in (analysis.get("zones_geographiques") or []) if isinstance(z, str) and z.strip()]
             if services or zones:
                 row_s, row_z = st.columns(2)
                 with row_s:
                     if services:
-                        st.markdown(f"""<div class="premium-card">
-                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Services</p>
-                            <p style="font-size:0.78rem; margin:0;">{' · '.join(services[:8])}</p>
-                        </div>""", unsafe_allow_html=True)
+                        render_info_card("Services", " · ".join(services[:8]), icon="🔧")
                 with row_z:
                     if zones:
-                        st.markdown(f"""<div class="premium-card">
-                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Zones géographiques</p>
-                            <p style="font-size:0.78rem; margin:0;">{' · '.join(zones[:8])}</p>
-                        </div>""", unsafe_allow_html=True)
+                        render_info_card("Zones géographiques", " · ".join(zones[:8]), icon="📍")
 
-            # —— 9. Google Maps (encart dédié si données disponibles) ——
-            maps_json = intel_data.get("google_maps_json")
-            if isinstance(maps_json, str):
-                try: maps_json = json.loads(maps_json)
-                except Exception: maps_json = None
-            if maps_json and isinstance(maps_json, dict):
-                maps_parts = []
-                if maps_json.get("stars") is not None:
-                    maps_parts.append(f"⭐ <b>{maps_json['stars']}/5</b> ({maps_json.get('ratings', 0)} avis)")
-                if maps_json.get("address"):
-                    maps_parts.append(f"📍 {maps_json['address']}")
-                if maps_json.get("phone"):
-                    maps_parts.append(f"📞 {maps_json['phone']}")
-                if maps_json.get("url"):
-                    accent_color = c['accent']
-                    maps_url = maps_json['url']
-                    maps_parts.append(f"🌐 <a href='{maps_url}' target='_blank' style='color:{accent_color};'>{maps_url[:50]}</a>")
-                if maps_parts:
-                    st.markdown(
-                        '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Google Maps</p>'
-                        + '<p style="font-size:0.8rem; margin:0; line-height:1.5;">' + " &nbsp;·&nbsp; ".join(maps_parts) + '</p></div>',
-                        unsafe_allow_html=True
+            # ── Refresh Button ────────────────────────────────
+            st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+            if st.button("🔄 Réactualiser l'analyse", key="refresh_intel"):
+                with st.spinner("Réactualisation..."):
+                    enrich_key = f"enrich_data_{syndic_siret}"
+                    if enrich_key not in st.session_state:
+                        cached_enrich = enricher.get_cached_data(syndic_siret)
+                        if cached_enrich:
+                            st.session_state[enrich_key] = cached_enrich
+                    domain = None
+                    enrich_data_r = st.session_state.get(enrich_key)
+                    if enrich_data_r:
+                        domain = enrich_data_r.get("domain")
+                    city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                    result = intel_engine.run_intelligence(
+                        siret=syndic_siret, name=syndic_name, city=city,
+                        domain=domain, pappers_data=pappers_info,
+                        nb_copros=int(syndic_row.get("nb_copros", 0)),
+                        total_lots=int(syndic_row.get("total_lots", 0)),
+                        force_refresh=True,
                     )
+                    if result:
+                        st.session_state[intel_key] = result
+                        st.rerun()
 
-            # —— 10. Bouton Réactualiser ——
-            st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
-            if st.button("Réactualiser l'analyse", key="refresh_intel", use_container_width=False):
-                status_box = st.empty()
-                progress_log = []
-
-                def on_refresh_status(msg):
-                    progress_log.append(msg)
-                    status_box.markdown(
-                        '<div class="premium-card" style="font-family:monospace; font-size:0.75rem; line-height:1.5; max-height:200px; overflow-y:auto;">'
-                        + '<br>'.join(f'<span style="color:{c["accent"]};">▸</span> {m}' for m in progress_log)
-                        + '</div>',
-                        unsafe_allow_html=True
-                    )
-
-                enrich_key = f"enrich_data_{syndic_siret}"
-                if enrich_key not in st.session_state:
-                    cached_enrich = enricher.get_cached_data(syndic_siret)
-                    if cached_enrich:
-                        st.session_state[enrich_key] = cached_enrich
-                domain = None
-                enrich_data = st.session_state.get(enrich_key)
-                if enrich_data:
-                    domain = enrich_data.get("domain")
-                city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
-                result = intel_engine.run_intelligence(
-                    siret=syndic_siret, name=syndic_name, city=city,
-                    domain=domain, pappers_data=pappers_info,
-                    nb_copros=int(syndic_row.get('nb_copros', 0)),
-                    total_lots=int(syndic_row.get('total_lots', 0)),
-                    force_refresh=True,
-                    status_callback=on_refresh_status,
-                )
-                if result:
-                    st.session_state[intel_key] = result
-                    st.rerun()
-
-            # —— 11. Données brutes du scraping (expander debug) ——
-            with st.expander("📊 Données brutes du scraping", expanded=False):
-                col_d1, col_d2 = st.columns(2)
-                with col_d1:
-                    st.markdown("**Résultats Google SERP**")
-                    serp_json = intel_data.get("serp_results_json", [])
-                    if isinstance(serp_json, str):
-                        try: serp_json = json.loads(serp_json)
-                        except Exception: serp_json = []
-                    if serp_json:
-                        for i, sr in enumerate(serp_json[:5], 1):
-                            st.markdown(f"{i}. [{sr.get('title', 'N/A')}]({sr.get('link', '#')})")
-                            st.caption(sr.get("snippet", "")[:150])
-                    else:
-                        st.caption("Aucun résultat SERP")
-
-                    st.markdown("**Domaine identifié**")
-                    st.code(f"{intel_data.get('identified_domain', 'N/A')} (source: {intel_data.get('domain_source', 'N/A')})")
-
-                with col_d2:
-                    st.markdown("**Google Maps**")
-                    if maps_json and isinstance(maps_json, dict):
-                        st.json(maps_json)
-                    else:
-                        st.caption("Aucune donnée Maps")
-
-                    st.markdown("**Contacts extraits du site**")
-                    phones_raw = intel_data.get("scraped_phones", [])
-                    emails_raw = intel_data.get("scraped_emails", [])
-                    if isinstance(phones_raw, str):
-                        try: phones_raw = json.loads(phones_raw)
-                        except Exception: phones_raw = []
-                    if isinstance(emails_raw, str):
-                        try: emails_raw = json.loads(emails_raw)
-                        except Exception: emails_raw = []
-                    if phones_raw:
-                        st.markdown(f"📞 {', '.join(phones_raw)}")
-                    if emails_raw:
-                        st.markdown(f"📧 {', '.join(emails_raw)}")
-                    if not phones_raw and not emails_raw:
-                        st.caption("Aucun contact extrait")
+    # ──────────────────────────────────────────────────────────
+    # TAB: Contacts
+    # ──────────────────────────────────────────────────────────
 
     with tab_contacts:
         from core.enrichment_manager import EnrichmentManager as EM2
 
-        # Merge contacts: Apollo intel contacts + enrichment contacts
         all_contacts = []
 
         # Source 1: Apollo contacts from intelligence pipeline
@@ -768,7 +667,7 @@ elif st.session_state['current_step'] == 3:
         if intel_contacts_raw:
             all_contacts.extend(intel_contacts_raw)
 
-        # Source 2: Enrichment manager contacts (Apollo targeted search)
+        # Source 2: Enrichment manager contacts
         enricher2 = EM2()
         enrich_key = f"enrich_data_{syndic_siret}"
         if enrich_key not in st.session_state:
@@ -778,13 +677,12 @@ elif st.session_state['current_step'] == 3:
 
         data_enrich = st.session_state.get(enrich_key)
         if data_enrich:
-            enrich_contacts = data_enrich.get('contacts_json', [])
+            enrich_contacts = data_enrich.get("contacts_json", [])
             if isinstance(enrich_contacts, str):
                 try:
                     enrich_contacts = json.loads(enrich_contacts)
                 except Exception:
                     enrich_contacts = []
-            # Deduplicate by email
             existing_emails = {ct.get("email", "").lower() for ct in all_contacts if ct.get("email")}
             for ec in enrich_contacts:
                 if ec.get("email", "").lower() not in existing_emails:
@@ -794,60 +692,174 @@ elif st.session_state['current_step'] == 3:
         if not all_contacts and not data_enrich:
             if st.button("🚀 Rechercher les contacts", type="primary", use_container_width=True):
                 with st.spinner("Recherche de contacts (Apollo)..."):
-                    city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
+                    city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
                     fresh = enricher2.enrich_syndic(syndic_siret, syndic_name, city, pappers_data=pappers_info)
                     if fresh:
                         st.session_state[enrich_key] = fresh
                         st.rerun()
         elif not all_contacts:
-            st.info("Aucun contact trouvé pour ce syndic.")
+            render_empty_state("Aucun contact trouvé", "Aucun contact n'a été identifié pour ce syndic.", "👤")
         else:
-            st.caption(f"{len(all_contacts)} contact(s) trouvé(s)")
-            for idx, ct in enumerate(all_contacts[:10]):
-                with st.container(border=True):
-                    col_ct, col_act = st.columns([3, 1])
-                    col_ct.markdown(f"**{ct.get('first_name', '')} {ct.get('last_name', '')}** — {ct.get('title') or 'Lead'}")
-                    details = []
-                    email_ct = ct.get('email', '')
-                    if email_ct:
-                        details.append(f"📧 {email_ct}")
-                    phones = ct.get('phone_numbers', [])
-                    if phones:
-                        details.append(f"📞 {', '.join(phones) if isinstance(phones, list) else phones}")
-                    linkedin_ct = ct.get('linkedin_url', '')
-                    if linkedin_ct:
-                        details.append(f"[LinkedIn]({linkedin_ct})")
-                    if details:
-                        col_ct.caption(" • ".join(details))
-                    if col_act.button("🎯 Prospecter", key=f"sel_{idx}"):
-                        st.session_state['selected_contact'] = ct
+            st.markdown(f'<p style="font-size:13px;color:{t["text_secondary"]};margin-bottom:12px;">{len(all_contacts)} contact(s) trouvé(s)</p>', unsafe_allow_html=True)
+
+            # Bulk select
+            if "selected_contacts" not in st.session_state:
+                st.session_state["selected_contacts"] = set()
+
+            select_all = st.checkbox("Tout sélectionner", key="select_all_contacts")
+
+            for idx, ct in enumerate(all_contacts[:15]):
+                col_check, col_card, col_action = st.columns([0.5, 4, 1])
+                with col_check:
+                    checked = st.checkbox("", key=f"ct_check_{idx}", value=select_all, label_visibility="collapsed")
+                    if checked:
+                        st.session_state["selected_contacts"].add(idx)
+                    elif idx in st.session_state.get("selected_contacts", set()):
+                        st.session_state["selected_contacts"].discard(idx)
+                with col_card:
+                    st.markdown(render_contact_card_html(ct, THEME), unsafe_allow_html=True)
+                with col_action:
+                    st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
+                    if st.button("🎯 Prospecter", key=f"sel_{idx}"):
+                        st.session_state["selected_contact"] = ct
                         go_to_step(4)
 
-    with tab_parc:
-        st.dataframe(st.session_state['selected_syndic_data'], use_container_width=True, hide_index=True, height=300)
+            selected_set = st.session_state.get("selected_contacts", set())
+            if len(selected_set) > 1:
+                st.markdown(f'<div style="height:8px;"></div>', unsafe_allow_html=True)
+                if st.button(f"🎯 Prospecter la sélection ({len(selected_set)} contacts)", type="primary"):
+                    first_idx = min(selected_set)
+                    st.session_state["selected_contact"] = all_contacts[first_idx]
+                    go_to_step(4)
 
-# --- STEP 4: PROSPECTING PACK ---
-elif st.session_state['current_step'] == 4:
-    import json as json4
+    # ──────────────────────────────────────────────────────────
+    # TAB: Parc ciblé
+    # ──────────────────────────────────────────────────────────
+
+    with tab_parc_cible:
+        df_parc = st.session_state["selected_syndic_data"]
+
+        if df_parc.empty:
+            render_empty_state("Aucune copropriété ciblée", "Les filtres actuels ne retournent aucun résultat pour ce syndic.", "🏢")
+        else:
+            # Stats summary
+            nb_copros = len(df_parc)
+            communes_uniques = df_parc["commune"].nunique() if "commune" in df_parc.columns else 0
+            lots_col = "nombre_de_lots_a_usage_d_habitation"
+            lots_moy = int(df_parc[lots_col].mean()) if lots_col in df_parc.columns else 0
+
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                render_kpi_card("Bâtiments ciblés", nb_copros, primary=True)
+            with s2:
+                render_kpi_card("Communes", communes_uniques)
+            with s3:
+                render_kpi_card("Lots moyens", lots_moy)
+
+            st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
+            # Cards grid
+            cols_per_row = 3
+            for i in range(0, len(df_parc), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j, col in enumerate(cols):
+                    if i + j < len(df_parc):
+                        row = df_parc.iloc[i + j]
+                        copro_name = row.get("nom_copropriete", "") or row.get("numero_immatriculation_copropriete", f"Copro #{i+j+1}")
+                        address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
+                        lots = int(row.get(lots_col, 0))
+                        period = row.get("periode_de_construction", "")
+                        with col:
+                            render_copro_card(str(copro_name), address, lots, str(period))
+
+    # ──────────────────────────────────────────────────────────
+    # TAB: Tout le parc
+    # ──────────────────────────────────────────────────────────
+
+    with tab_parc_all:
+        all_parc_key = f"all_parc_{syndic_name}"
+        if all_parc_key not in st.session_state:
+            with st.spinner("Chargement du parc complet..."):
+                st.session_state[all_parc_key] = fetch_all_data_by_syndic(syndic_name)
+
+        df_all = st.session_state[all_parc_key]
+
+        if df_all.empty:
+            render_empty_state("Aucune donnée", "Aucune copropriété trouvée pour ce syndic.", "🏢")
+        else:
+            lots_col = "nombre_de_lots_a_usage_d_habitation"
+            nb_all = len(df_all)
+            communes_all = df_all["commune"].nunique() if "commune" in df_all.columns else 0
+            lots_total_all = int(df_all[lots_col].sum()) if lots_col in df_all.columns else 0
+
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                render_kpi_card("Total bâtiments", nb_all, primary=True)
+            with s2:
+                render_kpi_card("Communes", communes_all)
+            with s3:
+                render_kpi_card("Total lots", f"{lots_total_all:,}".replace(",", " "))
+
+            st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+
+            # Column selection for readability
+            display_cols = []
+            col_mapping = {}
+            desired = {
+                "numero_immatriculation_copropriete": "N° Immat.",
+                "nom_copropriete": "Nom",
+                "adresse_de_reference": "Adresse",
+                "commune": "Commune",
+                "code_officiel_departement": "Dép.",
+                "nombre_de_lots_a_usage_d_habitation": "Lots hab.",
+                "nombre_total_de_lots": "Lots total",
+                "periode_de_construction": "Période",
+            }
+            for col_name, label in desired.items():
+                if col_name in df_all.columns:
+                    display_cols.append(col_name)
+                    col_mapping[col_name] = label
+
+            if display_cols:
+                df_show = df_all[display_cols].rename(columns=col_mapping)
+            else:
+                df_show = df_all
+
+            # Filter by commune
+            if "commune" in df_all.columns:
+                commune_filter = st.text_input("Filtrer par commune...", key="commune_filter_all", placeholder="Nom de commune...", label_visibility="collapsed")
+                if commune_filter:
+                    mask = df_show["Commune"].str.contains(commune_filter, case=False, na=False) if "Commune" in df_show.columns else pd.Series([True] * len(df_show))
+                    df_show = df_show[mask]
+
+            st.dataframe(df_show, use_container_width=True, hide_index=True, height=400)
+
+
+# ══════════════════════════════════════════════════════════════
+# STEP 4 — PACK
+# ══════════════════════════════════════════════════════════════
+
+elif st.session_state["current_step"] == 4:
     col_back, col_new = st.columns([1, 4])
     with col_back:
-        if st.button("⬅️ Contacts"): go_to_step(3)
+        if st.button("← Contacts"):
+            go_to_step(3)
     with col_new:
         if st.button("🔄 Nouvelle recherche"):
-            st.session_state['syndic_list'] = pd.DataFrame()
+            st.session_state["syndic_list"] = pd.DataFrame()
             go_to_step(1)
 
-    contact = st.session_state.get('selected_contact', {})
-    syndic_row = st.session_state.get('selected_syndic_row', {})
-    syndic_siret_pack = syndic_row.get('Siret', '')
+    contact = st.session_state.get("selected_contact", {})
+    syndic_row = st.session_state.get("selected_syndic_row", {})
+    syndic_siret_pack = syndic_row.get("Siret", "")
 
-    # Try to get LLM-generated icebreaker from intel cache
+    # Get intel data
     intel_key_pack = f"intel_data_{syndic_siret_pack}"
     intel_pack = st.session_state.get(intel_key_pack, {})
     analysis_pack = intel_pack.get("llm_analysis_json", {})
     if isinstance(analysis_pack, str):
         try:
-            analysis_pack = json4.loads(analysis_pack)
+            analysis_pack = json.loads(analysis_pack)
         except Exception:
             analysis_pack = {}
 
@@ -855,39 +867,97 @@ elif st.session_state['current_step'] == 4:
     score_pack = analysis_pack.get("score_prospection", "?")
     angle_pack = analysis_pack.get("angle_approche_recommande", "")
 
-    first_name = contact.get('first_name', 'Bonjour')
-    fallback_ice = f"Objet : {syndic_row.get('Syndic')}\n\nBonjour {first_name},\n\nJ'ai identifié {int(syndic_row.get('nb_copros', 0))} de vos immeubles à fort potentiel CEE..."
+    first_name = contact.get("first_name", "Bonjour")
+    fallback_ice = f"Objet : {syndic_row.get('Syndic', '')}\n\nBonjour {first_name},\n\nJ'ai identifié {int(syndic_row.get('nb_copros', 0))} de vos immeubles à fort potentiel CEE..."
     ice = llm_icebreaker if llm_icebreaker else fallback_ice
 
     c1, c2 = st.columns([2, 1])
-    with c1:
-        with st.container(border=True):
-            st.markdown("#### ✉️ Email Icebreaker")
-            if llm_icebreaker:
-                st.caption("✨ Généré par IA — personnalisé à partir de l'analyse du syndic")
-            else:
-                st.caption("📝 Template standard — lancez l'Intelligence pour un email personnalisé")
-            st.text_area("Template", value=ice, height=180, label_visibility="collapsed")
-            if st.button("📋 Copier le Pack"): st.toast("Copié !")
 
+    with c1:
+        # ── Email Preview ─────────────────────────────────────
+        st.markdown("### ✉️ Email de prospection")
+
+        if llm_icebreaker:
+            st.markdown(
+                f'<span class="cee-tag cee-tag-green" style="margin-bottom:8px;">✨ Personnalisé par IA</span>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<span class="cee-tag cee-tag-gray" style="margin-bottom:8px;">📝 Template standard</span>',
+                unsafe_allow_html=True,
+            )
+
+        contact_email = contact.get("email", "")
+        contact_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+
+        st.markdown(
+            f'<div class="cee-email-preview">'
+            f'<div class="cee-email-header">'
+            f'<strong>À :</strong> {contact_email or "—"}<br>'
+            f'<strong>De :</strong> Votre nom<br>'
+            f'<strong>Objet :</strong> Rénovation énergétique — {syndic_row.get("Syndic", "")}'
+            f'</div>'
+            f'<div class="cee-email-body">{ice}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+        # ── Action Buttons ────────────────────────────────────
+        btn1, btn2, btn3 = st.columns(3)
+        with btn1:
+            if st.button("📋 Copier", use_container_width=True):
+                st.toast("Contenu copié !")
+        with btn2:
+            mailto = f"mailto:{contact_email}?subject=Rénovation%20énergétique%20—%20{syndic_row.get('Syndic', '')}"
+            st.markdown(
+                f'<a href="{mailto}" target="_blank" style="display:block;text-align:center;padding:8px;'
+                f'background:{t["card_bg"]};border:1px solid {t["card_border"]};border-radius:8px;'
+                f'text-decoration:none;color:{t["text"]};font-size:13px;font-weight:500;">📨 Ouvrir mail</a>',
+                unsafe_allow_html=True,
+            )
+        with btn3:
+            tone = st.selectbox("Ton", ["Professionnel", "Décontracté", "Technique"], label_visibility="collapsed", key="tone_select")
+            if st.button("🔄 Régénérer", use_container_width=True, key="regen_email"):
+                st.toast(f"Régénération en ton {tone.lower()} — fonctionnalité à venir")
+
+        # ── Approach Angle ────────────────────────────────────
         if angle_pack:
-            st.markdown(f"""<div class="premium-card" style="border-left: 3px solid {c['accent']};">
-                <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🎯 Angle d'approche</p>
-                <p style="font-size:0.8rem; margin:0;">{angle_pack}</p>
-            </div>""", unsafe_allow_html=True)
+            render_info_card("Angle d'approche", angle_pack, accent_border=True, icon="🎯")
+
+        # ── Data Points Used ──────────────────────────────────
+        with st.expander("📊 Données utilisées pour la personnalisation"):
+            data_points = []
+            if analysis_pack.get("resume_activite"):
+                data_points.append(f"**Résumé activité** : {analysis_pack['resume_activite'][:100]}...")
+            if analysis_pack.get("taille_estimee"):
+                data_points.append(f"**Taille** : {analysis_pack['taille_estimee']}")
+            if analysis_pack.get("maturite_digitale"):
+                data_points.append(f"**Maturité digitale** : {analysis_pack['maturite_digitale']}")
+            data_points.append(f"**Copropriétés** : {syndic_row.get('nb_copros', 0)}")
+            data_points.append(f"**Lots** : {syndic_row.get('total_lots', 0)}")
+            if analysis_pack.get("points_forts"):
+                data_points.append(f"**Points forts** : {', '.join(analysis_pack['points_forts'][:3])}")
+            for dp in data_points:
+                st.markdown(f"- {dp}")
 
     with c2:
-        with st.container(border=True):
-            st.markdown("#### 📦 Détails")
-            st.caption(f"**{contact.get('first_name')} {contact.get('last_name')}**")
-            st.caption(f"`{contact.get('email', 'N/A')}`")
-            linkedin = contact.get('linkedin_url', '')
-            if linkedin:
-                st.caption(f"[LinkedIn]({linkedin})")
-            st.metric("Cibles", f"{int(syndic_row.get('nb_copros', 0))} bat.", delta=f"{int(syndic_row.get('total_lots', 0))} lots")
-            if isinstance(score_pack, (int, float)):
-                score_color_pack = "#10B981" if score_pack >= 7 else "#F59E0B" if score_pack >= 4 else "#EF4444"
-                st.markdown(f"""<div style="text-align:center; margin-top:0.5rem;">
-                    <p style="font-size:0.7rem; color:{c['sub_text']}; margin:0;">SCORE</p>
-                    <p style="font-size:1.5rem; font-weight:800; color:{score_color_pack}; margin:0;">{score_pack}/10</p>
-                </div>""", unsafe_allow_html=True)
+        # ── Contact Details ───────────────────────────────────
+        st.markdown("### 📦 Contact")
+        render_info_card(
+            "Destinataire",
+            f'<p style="font-size:15px;font-weight:600;margin:0;">{contact_name or "—"}</p>'
+            f'<p style="font-size:12px;color:{t["text_secondary"]};margin:4px 0 0 0;">{contact.get("title", "Contact")}</p>'
+            f'<p style="font-size:12px;margin:4px 0 0 0;">📧 {contact_email or "—"}</p>'
+            + (f'<p style="font-size:12px;margin:2px 0 0 0;"><a href="{contact.get("linkedin_url")}" target="_blank" style="color:{t["accent"]};">🔗 LinkedIn</a></p>' if contact.get("linkedin_url") else ""),
+            icon="👤",
+        )
+
+        # ── Target Stats ─────────────────────────────────────
+        render_kpi_card("Bâtiments cibles", f'{int(syndic_row.get("nb_copros", 0))}', subtitle=f'{int(syndic_row.get("total_lots", 0))} lots')
+
+        # ── Score ─────────────────────────────────────────────
+        if isinstance(score_pack, (int, float)):
+            render_score_gauge(score_pack, size=100)
