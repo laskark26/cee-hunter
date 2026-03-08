@@ -539,6 +539,18 @@ class SyndicIntelligence:
             "Si aucun contact n'est identifiable, retourne []."
         )
 
+        noise_patterns = [
+            r"(?i)nous utilisons des cookies.*?(?:personnaliser|tout accepter|tout refuser)",
+            r"(?i)le respect de votre vie priv[eé]e.*?(?:personnaliser|tout accepter)",
+            r"(?i)politique de confidentialit[eé]",
+            r"(?i)g[eé]rer les cookies",
+            r"(?i)propuls[eé] par",
+        ]
+        for pattern in noise_patterns:
+            combined = re.sub(pattern, "", combined, flags=re.DOTALL)
+        combined = re.sub(r"\s{3,}", " ", combined).strip()
+
+        print(f"DEBUG: LLM contact extraction - sending {len(combined)} chars to GPT-4o-mini")
         try:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -550,14 +562,19 @@ class SyndicIntelligence:
                 max_tokens=3000,
             )
             raw = response.choices[0].message.content.strip()
+            print(f"DEBUG: LLM raw response ({len(raw)} chars): {raw[:500]}")
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             contacts = json.loads(raw)
             if isinstance(contacts, list):
                 print(f"DEBUG: LLM extracted {len(contacts)} contacts from team pages")
                 return contacts
+            print(f"DEBUG: LLM response is not a list: {type(contacts)}")
+        except json.JSONDecodeError as e:
+            print(f"DEBUG: LLM contact JSON parse error: {e}")
+            print(f"DEBUG: LLM raw content was: {raw[:1000]}")
         except Exception as e:
-            print(f"DEBUG: LLM contact extraction error: {e}")
+            print(f"DEBUG: LLM contact extraction error: {type(e).__name__}: {e}")
         return []
 
     # ── SerpApi: Social & Reputation (via Google SERP) ──────
