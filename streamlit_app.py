@@ -445,6 +445,22 @@ elif st.session_state["current_step"] == 3:
         if not intel_data:
             render_divider()
             if st.button("🔬 Lancer l'Intelligence", type="primary", use_container_width=True):
+                status_box = st.empty()
+                progress_logs = []
+
+                def on_status(msg):
+                    progress_logs.append(msg)
+                    log_html = "".join(
+                        f'<p style="margin:2px 0;font-size:12px;color:{t["text_secondary"]};">{m}</p>'
+                        for m in progress_logs[-10:]
+                    )
+                    status_box.markdown(
+                        f'<div class="cee-card" style="padding:12px;max-height:250px;overflow-y:auto;">'
+                        f'<p class="cee-card-title" style="margin-bottom:6px;">🔄 Progression du scraping</p>'
+                        f'{log_html}</div>',
+                        unsafe_allow_html=True,
+                    )
+
                 with st.spinner("Analyse en cours... Scraping, réseaux sociaux, IA..."):
                     enrich_key = f"enrich_data_{syndic_siret}"
                     if enrich_key not in st.session_state:
@@ -466,6 +482,7 @@ elif st.session_state["current_step"] == 3:
                         pappers_data=pappers_info,
                         nb_copros=int(syndic_row.get("nb_copros", 0)),
                         total_lots=int(syndic_row.get("total_lots", 0)),
+                        status_callback=on_status,
                     )
                     if result:
                         st.session_state[intel_key] = result
@@ -623,9 +640,113 @@ elif st.session_state["current_step"] == 3:
                     if zones:
                         render_info_card("Zones géographiques", " · ".join(zones[:8]), icon="📍")
 
+            # ── Google Maps Data ──────────────────────────────
+            maps_json = intel_data.get("google_maps_json")
+            if isinstance(maps_json, str):
+                try:
+                    maps_json = json.loads(maps_json)
+                except Exception:
+                    maps_json = None
+            if maps_json and isinstance(maps_json, dict):
+                maps_parts = []
+                maps_name = maps_json.get("name", "")
+                maps_stars = maps_json.get("stars")
+                maps_ratings = maps_json.get("ratings", 0)
+                maps_address = maps_json.get("address", "")
+                maps_phone = maps_json.get("phone", "")
+                maps_url = maps_json.get("url", "")
+
+                if maps_name:
+                    star_display = ""
+                    if maps_stars is not None:
+                        star_display = f" — ⭐ {maps_stars}/5 ({maps_ratings} avis)"
+                    maps_parts.append(f"<strong>{maps_name}</strong>{star_display}")
+                if maps_address:
+                    maps_parts.append(f"📍 {maps_address}")
+                if maps_phone:
+                    maps_parts.append(f"📞 {maps_phone}")
+                if maps_url:
+                    accent = t["accent"]
+                    maps_parts.append(
+                        f'🌐 <a href="{maps_url}" target="_blank" style="color:{accent};text-decoration:none;">'
+                        f'{maps_url[:60]}{"…" if len(maps_url) > 60 else ""}</a>'
+                    )
+                render_info_card("Google Maps", "<br>".join(maps_parts), icon="🗺️", accent_border=True)
+
+            # ── Raw Scraping Data (Debug) ─────────────────────
+            with st.expander("🔍 Données brutes du scraping (debug)", expanded=False):
+                serp_json = intel_data.get("serp_results_json")
+                if isinstance(serp_json, str):
+                    try:
+                        serp_json = json.loads(serp_json)
+                    except Exception:
+                        serp_json = None
+
+                identified_domain = intel_data.get("identified_domain", "")
+                domain_source = intel_data.get("domain_source", "")
+
+                st.markdown(f"**Domaine identifié :** `{identified_domain or 'Aucun'}` (source: `{domain_source}`)")
+
+                if serp_json:
+                    st.markdown("**Résultats Google SERP :**")
+                    for idx_s, sr in enumerate(serp_json, 1):
+                        sr_title = sr.get("title", "Sans titre")
+                        sr_link = sr.get("link", "")
+                        sr_snippet = sr.get("snippet", "")[:150]
+                        st.markdown(
+                            f"{idx_s}. **{sr_title}**  \n"
+                            f"   [{sr_link}]({sr_link})  \n"
+                            f"   _{sr_snippet}_"
+                        )
+                else:
+                    st.markdown("**Résultats Google SERP :** Aucun")
+
+                if maps_json:
+                    st.markdown("**Données Google Maps (JSON brut) :**")
+                    st.json(maps_json)
+                else:
+                    st.markdown("**Données Google Maps :** Aucune")
+
+                raw_phones = intel_data.get("scraped_phones", [])
+                raw_emails = intel_data.get("scraped_emails", [])
+                if isinstance(raw_phones, str):
+                    try:
+                        raw_phones = json.loads(raw_phones)
+                    except Exception:
+                        raw_phones = []
+                if isinstance(raw_emails, str):
+                    try:
+                        raw_emails = json.loads(raw_emails)
+                    except Exception:
+                        raw_emails = []
+
+                st.markdown(f"**Téléphones scrapés :** {', '.join(raw_phones) if raw_phones else 'Aucun'}")
+                st.markdown(f"**Emails scrapés :** {', '.join(raw_emails) if raw_emails else 'Aucun'}")
+
+                raw_content = intel_data.get("raw_website_content", "")
+                if raw_content:
+                    st.markdown(f"**Contenu brut du site** ({len(raw_content)} caractères) :")
+                    st.text_area("Contenu brut", raw_content[:5000], height=200, disabled=True, label_visibility="collapsed")
+
             # ── Refresh Button ────────────────────────────────
             st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
             if st.button("🔄 Réactualiser l'analyse", key="refresh_intel"):
+                refresh_status_box = st.empty()
+                refresh_logs = []
+
+                def on_refresh_status(msg):
+                    refresh_logs.append(msg)
+                    log_html = "".join(
+                        f'<p style="margin:2px 0;font-size:12px;color:{t["text_secondary"]};">{m}</p>'
+                        for m in refresh_logs[-10:]
+                    )
+                    refresh_status_box.markdown(
+                        f'<div class="cee-card" style="padding:12px;max-height:250px;overflow-y:auto;">'
+                        f'<p class="cee-card-title" style="margin-bottom:6px;">🔄 Progression du scraping</p>'
+                        f'{log_html}</div>',
+                        unsafe_allow_html=True,
+                    )
+
                 with st.spinner("Réactualisation..."):
                     enrich_key = f"enrich_data_{syndic_siret}"
                     if enrich_key not in st.session_state:
@@ -643,6 +764,7 @@ elif st.session_state["current_step"] == 3:
                         nb_copros=int(syndic_row.get("nb_copros", 0)),
                         total_lots=int(syndic_row.get("total_lots", 0)),
                         force_refresh=True,
+                        status_callback=on_refresh_status,
                     )
                     if result:
                         st.session_state[intel_key] = result
