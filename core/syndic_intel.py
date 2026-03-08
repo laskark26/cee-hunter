@@ -418,6 +418,7 @@ class SyndicIntelligence:
         team_pages_text = []
         visited = set()
         to_visit = [base_url]
+        page_count = 0
 
         while to_visit and len(visited) < self.MAX_PAGES:
             url = to_visit.pop(0)
@@ -428,9 +429,12 @@ class SyndicIntelligence:
             visited.add(url)
             try:
                 resp = self._scrape_single_page(url)
+                final_url = resp.url
                 if resp.status_code != 200 or "text/html" not in resp.headers.get("Content-Type", ""):
                     continue
+                visited.add(final_url)
                 soup = BeautifulSoup(resp.text, "html.parser")
+                page_count += 1
 
                 page_phones, page_emails = self._extract_contact_info(soup)
                 all_phones.update(page_phones)
@@ -439,12 +443,16 @@ class SyndicIntelligence:
                 if len(visited) < self.MAX_PAGES:
                     for link in soup.find_all("a", href=True):
                         href = link["href"]
+                        if href.startswith("javascript:") or href.startswith("#") or href.startswith("mailto:") or href.startswith("tel:"):
+                            continue
                         if href.startswith("/"):
                             href = base_url + href
+                        elif not href.startswith("http"):
+                            href = base_url + "/" + href
                         if domain in href and href not in visited and self._is_useful_page(href):
                             if self._is_priority_page(href):
                                 to_visit.insert(0, href)
-                            elif len(to_visit) < 10:
+                            elif len(to_visit) < 15:
                                 to_visit.append(href)
 
                 for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe"]):
@@ -452,11 +460,13 @@ class SyndicIntelligence:
 
                 page_text = soup.get_text(separator=" ", strip=True)
                 page_text = re.sub(r"\s+", " ", page_text)[:self.MAX_CHARS_PER_PAGE]
-                all_text.append(f"[PAGE: {url}]\n{page_text}")
+                all_text.append(f"[PAGE: {final_url}]\n{page_text}")
 
-                is_home = (url.rstrip("/") == base_url.rstrip("/"))
-                if self._is_priority_page(url) or is_home:
-                    team_pages_text.append(f"[PAGE: {url}]\n{page_text}")
+                is_home = page_count == 1
+                is_priority = self._is_priority_page(final_url)
+                if is_priority or is_home:
+                    team_pages_text.append(f"[PAGE: {final_url}]\n{page_text}")
+                    print(f"DEBUG: Team page detected: {final_url} (home={is_home}, priority={is_priority})")
             except Exception as e:
                 print(f"DEBUG: Scrape error for {url}: {e}")
                 continue
