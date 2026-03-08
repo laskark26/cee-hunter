@@ -250,9 +250,13 @@ def _google_earth_url(address: str) -> str:
     return f"https://earth.google.com/web/search/{quote_plus(address)}"
 
 
-def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data: dict = None):
+def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data: dict = None, numero_immat: str = ""):
     """Card for a single copropriété in the targeted portfolio view."""
     period_display = PERIOD_LABELS.get(period, period or "—")
+
+    immat_html = ""
+    if numero_immat and numero_immat != name:
+        immat_html = f'<p style="font-size:11px;color:#9CA3AF;margin:0 0 4px 0;">{numero_immat}</p>'
 
     earth_link = ""
     if address:
@@ -288,6 +292,7 @@ def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data
     st.markdown(
         f'<div class="cee-copro-card">'
         f'<h4>{name or "Copropriété"}</h4>'
+        f'{immat_html}'
         f'<p style="font-size:12px;color:#6B7280;margin:0 0 8px 0;">{address}{earth_link}</p>'
         f'<div class="cee-copro-meta">'
         f'<span class="cee-copro-badge">🏠 {lots} lots</span>'

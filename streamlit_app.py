@@ -1072,12 +1072,14 @@ elif st.session_state["current_step"] == 3:
                         if i + j < len(filtered_indices):
                             idx = filtered_indices[i + j]
                             row = df_parc.iloc[idx]
-                            copro_name = row.get("nom_copropriete", "") or row.get("numero_immatriculation_copropriete", f"Copro #{idx+1}")
+                            nom_copro = str(row.get("nom_copropriete", "") or "")
+                            num_immat = str(row.get("numero_immatriculation_copropriete", ""))
+                            copro_name = nom_copro or num_immat or f"Copro #{idx+1}"
                             address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
                             lots = int(row.get(lots_col, 0))
                             period = row.get("periode_de_construction", "")
                             with col:
-                                render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_cache.get(idx))
+                                render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_cache.get(idx), numero_immat=num_immat)
 
     # ──────────────────────────────────────────────────────────
     # TAB: Tout le parc
