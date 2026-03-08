@@ -441,35 +441,46 @@ elif st.session_state['current_step'] == 3:
             col_btn, col_refresh = st.columns([3, 1])
             with col_btn:
                 if st.button("🔬 Lancer l'Intelligence", type="primary", use_container_width=True):
-                    with st.spinner("Analyse en cours... Scraping du site, recherche réseaux sociaux, analyse IA..."):
-                        # Get domain from enrichment or pappers
-                        enrich_key = f"enrich_data_{syndic_siret}"
-                        if enrich_key not in st.session_state:
-                            cached_enrich = enricher.get_cached_data(syndic_siret)
-                            if cached_enrich:
-                                st.session_state[enrich_key] = cached_enrich
-                        domain = None
-                        enrich_data = st.session_state.get(enrich_key)
-                        if enrich_data:
-                            domain = enrich_data.get("domain")
-                        if not domain and pappers_info:
-                            sites = pappers_info.get("sites_internet", "")
-                            if sites:
-                                domain = sites.split(",")[0].strip().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+                    status_box = st.empty()
+                    progress_log = []
 
-                        city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
-                        result = intel_engine.run_intelligence(
-                            siret=syndic_siret,
-                            name=syndic_name,
-                            city=city,
-                            domain=domain,
-                            pappers_data=pappers_info,
-                            nb_copros=int(syndic_row.get('nb_copros', 0)),
-                            total_lots=int(syndic_row.get('total_lots', 0)),
+                    def on_status(msg):
+                        progress_log.append(msg)
+                        status_box.markdown(
+                            '<div class="premium-card" style="font-family:monospace; font-size:0.75rem; line-height:1.5; max-height:200px; overflow-y:auto;">'
+                            + '<br>'.join(f'<span style="color:{c["accent"]};">▸</span> {m}' for m in progress_log)
+                            + '</div>',
+                            unsafe_allow_html=True
                         )
-                        if result:
-                            st.session_state[intel_key] = result
-                            st.rerun()
+
+                    enrich_key = f"enrich_data_{syndic_siret}"
+                    if enrich_key not in st.session_state:
+                        cached_enrich = enricher.get_cached_data(syndic_siret)
+                        if cached_enrich:
+                            st.session_state[enrich_key] = cached_enrich
+                    domain = None
+                    enrich_data = st.session_state.get(enrich_key)
+                    if enrich_data:
+                        domain = enrich_data.get("domain")
+                    if not domain and pappers_info:
+                        sites = pappers_info.get("sites_internet", "")
+                        if sites:
+                            domain = sites.split(",")[0].strip().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+
+                    city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
+                    result = intel_engine.run_intelligence(
+                        siret=syndic_siret,
+                        name=syndic_name,
+                        city=city,
+                        domain=domain,
+                        pappers_data=pappers_info,
+                        nb_copros=int(syndic_row.get('nb_copros', 0)),
+                        total_lots=int(syndic_row.get('total_lots', 0)),
+                        status_callback=on_status,
+                    )
+                    if result:
+                        st.session_state[intel_key] = result
+                        st.rerun()
         else:
             analysis = intel_data.get("llm_analysis_json", {})
             if isinstance(analysis, str):
@@ -638,30 +649,106 @@ elif st.session_state['current_step'] == 3:
                             <p style="font-size:0.78rem; margin:0;">{' · '.join(zones[:8])}</p>
                         </div>""", unsafe_allow_html=True)
 
-            # —— 9. Bouton Réactualiser (ligne dédiée, évite le truncate) ——
+            # —— 9. Google Maps (encart dédié si données disponibles) ——
+            maps_json = intel_data.get("google_maps_json")
+            if isinstance(maps_json, str):
+                try: maps_json = json.loads(maps_json)
+                except Exception: maps_json = None
+            if maps_json and isinstance(maps_json, dict):
+                maps_parts = []
+                if maps_json.get("stars") is not None:
+                    maps_parts.append(f"⭐ <b>{maps_json['stars']}/5</b> ({maps_json.get('ratings', 0)} avis)")
+                if maps_json.get("address"):
+                    maps_parts.append(f"📍 {maps_json['address']}")
+                if maps_json.get("phone"):
+                    maps_parts.append(f"📞 {maps_json['phone']}")
+                if maps_json.get("url"):
+                    maps_parts.append(f"🌐 <a href='{maps_json['url']}' target='_blank' style='color:{c[\"accent\"]};'>{maps_json['url'][:50]}</a>")
+                if maps_parts:
+                    st.markdown(
+                        '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Google Maps</p>'
+                        + '<p style="font-size:0.8rem; margin:0; line-height:1.5;">' + " &nbsp;·&nbsp; ".join(maps_parts) + '</p></div>',
+                        unsafe_allow_html=True
+                    )
+
+            # —— 10. Bouton Réactualiser ——
             st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
             if st.button("Réactualiser l'analyse", key="refresh_intel", use_container_width=False):
-                with st.spinner("Réactualisation..."):
-                    enrich_key = f"enrich_data_{syndic_siret}"
-                    if enrich_key not in st.session_state:
-                        cached_enrich = enricher.get_cached_data(syndic_siret)
-                        if cached_enrich:
-                            st.session_state[enrich_key] = cached_enrich
-                    domain = None
-                    enrich_data = st.session_state.get(enrich_key)
-                    if enrich_data:
-                        domain = enrich_data.get("domain")
-                    city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
-                    result = intel_engine.run_intelligence(
-                        siret=syndic_siret, name=syndic_name, city=city,
-                        domain=domain, pappers_data=pappers_info,
-                        nb_copros=int(syndic_row.get('nb_copros', 0)),
-                        total_lots=int(syndic_row.get('total_lots', 0)),
-                        force_refresh=True,
+                status_box = st.empty()
+                progress_log = []
+
+                def on_refresh_status(msg):
+                    progress_log.append(msg)
+                    status_box.markdown(
+                        '<div class="premium-card" style="font-family:monospace; font-size:0.75rem; line-height:1.5; max-height:200px; overflow-y:auto;">'
+                        + '<br>'.join(f'<span style="color:{c["accent"]};">▸</span> {m}' for m in progress_log)
+                        + '</div>',
+                        unsafe_allow_html=True
                     )
-                    if result:
-                        st.session_state[intel_key] = result
-                        st.rerun()
+
+                enrich_key = f"enrich_data_{syndic_siret}"
+                if enrich_key not in st.session_state:
+                    cached_enrich = enricher.get_cached_data(syndic_siret)
+                    if cached_enrich:
+                        st.session_state[enrich_key] = cached_enrich
+                domain = None
+                enrich_data = st.session_state.get(enrich_key)
+                if enrich_data:
+                    domain = enrich_data.get("domain")
+                city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
+                result = intel_engine.run_intelligence(
+                    siret=syndic_siret, name=syndic_name, city=city,
+                    domain=domain, pappers_data=pappers_info,
+                    nb_copros=int(syndic_row.get('nb_copros', 0)),
+                    total_lots=int(syndic_row.get('total_lots', 0)),
+                    force_refresh=True,
+                    status_callback=on_refresh_status,
+                )
+                if result:
+                    st.session_state[intel_key] = result
+                    st.rerun()
+
+            # —— 11. Données brutes du scraping (expander debug) ——
+            with st.expander("📊 Données brutes du scraping", expanded=False):
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
+                    st.markdown("**Résultats Google SERP**")
+                    serp_json = intel_data.get("serp_results_json", [])
+                    if isinstance(serp_json, str):
+                        try: serp_json = json.loads(serp_json)
+                        except Exception: serp_json = []
+                    if serp_json:
+                        for i, sr in enumerate(serp_json[:5], 1):
+                            st.markdown(f"{i}. [{sr.get('title', 'N/A')}]({sr.get('link', '#')})")
+                            st.caption(sr.get("snippet", "")[:150])
+                    else:
+                        st.caption("Aucun résultat SERP")
+
+                    st.markdown("**Domaine identifié**")
+                    st.code(f"{intel_data.get('identified_domain', 'N/A')} (source: {intel_data.get('domain_source', 'N/A')})")
+
+                with col_d2:
+                    st.markdown("**Google Maps**")
+                    if maps_json and isinstance(maps_json, dict):
+                        st.json(maps_json)
+                    else:
+                        st.caption("Aucune donnée Maps")
+
+                    st.markdown("**Contacts extraits du site**")
+                    phones_raw = intel_data.get("scraped_phones", [])
+                    emails_raw = intel_data.get("scraped_emails", [])
+                    if isinstance(phones_raw, str):
+                        try: phones_raw = json.loads(phones_raw)
+                        except Exception: phones_raw = []
+                    if isinstance(emails_raw, str):
+                        try: emails_raw = json.loads(emails_raw)
+                        except Exception: emails_raw = []
+                    if phones_raw:
+                        st.markdown(f"📞 {', '.join(phones_raw)}")
+                    if emails_raw:
+                        st.markdown(f"📧 {', '.join(emails_raw)}")
+                    if not phones_raw and not emails_raw:
+                        st.caption("Aucun contact extrait")
 
     with tab_contacts:
         from core.enrichment_manager import EnrichmentManager as EM2

@@ -764,49 +764,63 @@ class SyndicIntelligence:
     # ── Main Pipeline ────────────────────────────────────────
 
     def run_intelligence(self, siret, name, city="", domain=None, pappers_data=None,
-                         nb_copros=0, total_lots=0, force_refresh=False, lat=None, lon=None):
+                         nb_copros=0, total_lots=0, force_refresh=False, lat=None, lon=None,
+                         status_callback=None):
+        def _status(msg):
+            print(f"DEBUG: {msg}")
+            if status_callback:
+                status_callback(msg)
+
         if not force_refresh:
             cached = self.get_cached_intel(siret)
             if cached:
                 return cached
 
-        # 1. Google SERP: 2 searches -> up to 5 organic results
-        print(f"DEBUG: [1/7] Google SERP search for '{name}'")
+        # 1. Google SERP
+        _status(f"[1/7] Recherche Google SERP pour '{name}'...")
         serp_results = self.google_search(name)
-        print(f"DEBUG: SERP returned {len(serp_results)} results")
+        _status(f"[1/7] SERP : {len(serp_results)} résultats trouvés")
 
-        # 2. Google Maps: search for business listing
-        print(f"DEBUG: [2/7] Google Maps search for '{name}' in '{city}'")
+        # 2. Google Maps
+        _status(f"[2/7] Recherche Google Maps pour '{name}' à '{city}'...")
         maps_data = self.google_maps_search(name, city, lat=lat, lon=lon)
-        print(f"DEBUG: Maps data: {'found' if maps_data else 'not found'}")
+        if maps_data:
+            _status(f"[2/7] Maps : {maps_data.get('name', '?')} — {maps_data.get('stars', '?')}/5 ({maps_data.get('ratings', 0)} avis)")
+        else:
+            _status("[2/7] Maps : aucun résultat")
 
-        # 3. Identify domain from all sources
-        print(f"DEBUG: [3/7] Identifying domain (provided: {domain})")
+        # 3. Identify domain
+        _status(f"[3/7] Identification du domaine (fourni: {domain or 'aucun'})...")
         if not domain:
             domain, domain_source = self.identify_domain(serp_results, name, pappers_data, maps_data)
-            print(f"DEBUG: Identified domain: {domain} (source: {domain_source})")
+            _status(f"[3/7] Domaine identifié : {domain or 'aucun'} (source: {domain_source})")
         else:
             domain_source = "provided"
+            _status(f"[3/7] Domaine fourni : {domain}")
 
-        # 4. Scrape website via ScraperAPI proxy
-        print(f"DEBUG: [4/7] Scraping website: {domain}")
+        # 4. Scrape website
+        _status(f"[4/7] Scraping du site {domain or 'N/A'}...")
         website_content, scraped_phones, scraped_emails = self.scrape_website(domain)
-        print(f"DEBUG: Scraped {len(website_content)} chars, {len(scraped_phones)} phones, {len(scraped_emails)} emails")
+        _status(f"[4/7] Scraping : {len(website_content)} chars, {len(scraped_phones)} tél, {len(scraped_emails)} emails")
 
-        # 5. Social presence via Google SERP
-        print(f"DEBUG: [5/7] Social presence search")
+        # 5. Social presence
+        _status("[5/7] Recherche présence réseaux sociaux...")
         social_links = self.search_social_presence(name, city)
+        social_count = sum(len(v) for v in social_links.values() if isinstance(v, list))
+        _status(f"[5/7] Réseaux sociaux : {social_count} liens trouvés")
 
-        # 6. Reputation via Google SERP
-        print(f"DEBUG: [6/7] Reputation search")
+        # 6. Reputation
+        _status("[6/7] Recherche réputation en ligne...")
         reviews_data = self.search_reputation(name)
+        _status(f"[6/7] Réputation : {len(reviews_data)} chars collectés")
 
-        # 7. Apollo contacts (unchanged)
-        print(f"DEBUG: [7/7] Apollo contacts")
+        # 7. Apollo contacts
+        _status("[7/7] Recherche contacts Apollo...")
         apollo_contacts = self._fetch_apollo_contacts(domain, name)
+        _status(f"[7/7] Apollo : {len(apollo_contacts)} contacts trouvés")
 
-        # LLM Analysis with all enriched data
-        print(f"DEBUG: Running LLM analysis...")
+        # LLM Analysis
+        _status("Analyse LLM en cours (GPT-4o-mini)...")
         llm_analysis = self.analyze_with_llm(
             website_content=website_content,
             social_links=social_links,
