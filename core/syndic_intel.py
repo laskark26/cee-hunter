@@ -13,7 +13,7 @@ from rapidfuzz import fuzz
 
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_syndic_intel"
-ANALYSIS_VERSION = 5
+ANALYSIS_VERSION = 6
 DEFAULT_TTL_DAYS = 30
 
 # ── SerpApi Configuration ─────────────────────────────────
@@ -643,16 +643,33 @@ class SyndicIntelligence:
 
         for source, domain in candidates:
             domain_name = domain.split('.')[0]
-            score = fuzz.partial_ratio(clean_name, domain_name)
-            source_bonus = {"pappers": 10, "google_maps": 8, "pappers_email": 5, "serp": 0}.get(source, 0)
+            domain_clean = re.sub(r'[^a-zA-Z0-9]', '', domain_name.lower())
+            score = fuzz.partial_ratio(clean_name, domain_clean)
+            source_bonus = {"pappers": 15, "google_maps": 12, "pappers_email": 8, "serp": 0}.get(source, 0)
             total = score + source_bonus
             if total > best_score:
                 best_score = total
                 best_domain = domain
                 best_source = source
 
-        if best_score >= 55:
+        if best_score >= 45:
             return best_domain, best_source
+
+        # Fallback: trust Google Maps URL if available (very reliable source)
+        for source, domain in candidates:
+            if source == "google_maps":
+                print(f"DEBUG: Domain fallback to Google Maps: {domain} (best fuzzy score was {best_score})")
+                return domain, "google_maps_fallback"
+
+        # Fallback: take the most common SERP domain
+        serp_domains = [d for s, d in candidates if s == "serp"]
+        if serp_domains:
+            from collections import Counter
+            most_common = Counter(serp_domains).most_common(1)[0]
+            if most_common[1] >= 2:
+                print(f"DEBUG: Domain fallback to most common SERP domain: {most_common[0]} (appeared {most_common[1]}x)")
+                return most_common[0], "serp_fallback"
+
         return None, "none"
 
     # ── Apollo Contacts ──────────────────────────────────────
