@@ -287,3 +287,72 @@ def dry_run():
     except Exception as e:
         print(f"Dry-run failed: {e}")
         return False
+
+
+# ── Saved Searches ──────────────────────────────────────────
+
+SAVED_SEARCHES_TABLE = "gen-lang-client-0045947309.rnic.saved_searches"
+
+
+def init_saved_searches_table():
+    client = get_bigquery_client()
+    try:
+        client.query(f"""
+            CREATE TABLE IF NOT EXISTS `{SAVED_SEARCHES_TABLE}` (
+                id STRING,
+                name STRING,
+                filters_json STRING,
+                created_at TIMESTAMP
+            )
+        """).result()
+    except Exception as e:
+        print(f"Error creating saved_searches table: {e}")
+
+
+def get_saved_searches():
+    client = get_bigquery_client()
+    try:
+        df = client.query(
+            f"SELECT * FROM `{SAVED_SEARCHES_TABLE}` ORDER BY created_at DESC"
+        ).to_dataframe()
+        if df.empty:
+            return []
+        rows = df.to_dict("records")
+        import json as _json
+        for r in rows:
+            if isinstance(r.get("filters_json"), str):
+                try:
+                    r["filters_json"] = _json.loads(r["filters_json"])
+                except Exception:
+                    r["filters_json"] = {}
+        return rows
+    except Exception as e:
+        print(f"Error loading saved searches: {e}")
+        return []
+
+
+def save_search(name, filters):
+    import json as _json
+    import uuid
+    client = get_bigquery_client()
+    try:
+        from datetime import datetime
+        row = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "filters_json": _json.dumps(filters, ensure_ascii=False),
+            "created_at": datetime.now().isoformat(),
+        }
+        client.insert_rows_json(SAVED_SEARCHES_TABLE, [row])
+    except Exception as e:
+        print(f"Error saving search: {e}")
+
+
+def delete_saved_search(search_id):
+    client = get_bigquery_client()
+    try:
+        client.query(
+            f"DELETE FROM `{SAVED_SEARCHES_TABLE}` WHERE id = '{search_id}'"
+        ).result()
+    except Exception as e:
+        print(f"Error deleting saved search: {e}")

@@ -4,6 +4,7 @@ import json
 from core.data_manager import (
     fetch_aggregated_syndics, fetch_data_by_syndic, fetch_all_data_by_syndic,
     count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES,
+    init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
 )
 from styles import generate_css, get_theme, score_color, PALETTE
 from components import (
@@ -141,35 +142,78 @@ if st.session_state["current_step"] == 1:
 
     # ── Presets ───────────────────────────────────────────────
     render_section_label("Recherche rapide")
-    p1, p2, p3, _ = st.columns([1, 1, 1, 2])
-    with p1:
-        if st.button("🔥 Passoires IDF", use_container_width=True):
-            st.session_state["preset_zones"] = ["H1"]
-            st.session_state["preset_regions"] = ["Île-de-France"]
-            st.session_state["preset_periods"] = ["Avant 1949", "1949-1974"]
-            st.session_state["preset_lots"] = (20, 500)
-            st.rerun()
-    with p2:
-        if st.button("🏢 Grands parcs H1", use_container_width=True):
-            st.session_state["preset_zones"] = ["H1"]
-            st.session_state["preset_regions"] = []
-            st.session_state["preset_periods"] = ["Avant 1949", "1949-1974", "1975-1993"]
-            st.session_state["preset_lots"] = (100, 1000)
-            st.rerun()
-    with p3:
-        if st.button("📍 QPV prioritaires", use_container_width=True):
-            st.session_state["preset_zones"] = ["H1", "H2"]
-            st.session_state["preset_regions"] = []
-            st.session_state["preset_periods"] = ["Avant 1949", "1949-1974"]
-            st.session_state["preset_lots"] = (20, 500)
-            st.session_state["preset_qpv"] = True
-            st.rerun()
+
+    if "saved_searches_init" not in st.session_state:
+        init_saved_searches_table()
+        st.session_state["saved_searches_init"] = True
+
+    if "saved_searches_cache" not in st.session_state:
+        st.session_state["saved_searches_cache"] = get_saved_searches()
+    saved_searches = st.session_state["saved_searches_cache"]
+
+    builtin_presets = [
+        ("🔥 Passoires IDF", {"zones": ["H1"], "regions": ["Île-de-France"], "periods": ["Avant 1949", "1949-1974"], "lots": [20, 500], "qpv": False, "exclude_big": True, "departments": []}),
+        ("🏢 Grands parcs H1", {"zones": ["H1"], "regions": [], "periods": ["Avant 1949", "1949-1974", "1975-1993"], "lots": [100, 1000], "qpv": False, "exclude_big": True, "departments": []}),
+        ("📍 QPV prioritaires", {"zones": ["H1", "H2"], "regions": [], "periods": ["Avant 1949", "1949-1974"], "lots": [20, 500], "qpv": True, "exclude_big": True, "departments": []}),
+    ]
+
+    all_presets = builtin_presets + [(f"💾 {s['name']}", s["filters_json"], s["id"]) for s in saved_searches]
+
+    nb_cols = min(len(all_presets) + 1, 6)
+    cols = st.columns(nb_cols)
+
+    for i, preset_data in enumerate(all_presets):
+        if len(preset_data) == 3:
+            label, filters, search_id = preset_data
+        else:
+            label, filters = preset_data
+            search_id = None
+
+        with cols[i % nb_cols]:
+            if st.button(label, use_container_width=True, key=f"preset_{i}"):
+                st.session_state["preset_zones"] = filters.get("zones", ["H1"])
+                st.session_state["preset_regions"] = filters.get("regions", [])
+                st.session_state["preset_periods"] = filters.get("periods", ["Avant 1949", "1949-1974"])
+                lots = filters.get("lots", [20, 500])
+                st.session_state["preset_lots"] = tuple(lots) if isinstance(lots, list) else lots
+                if filters.get("qpv"):
+                    st.session_state["preset_qpv"] = True
+                if filters.get("departments"):
+                    st.session_state["preset_departments"] = filters["departments"]
+                st.rerun()
+
+    # Save / Delete controls
+    with st.expander("💾 Gérer mes recherches", expanded=False):
+        save_col, del_col = st.columns(2)
+        with save_col:
+            search_name = st.text_input("Nom de la recherche", placeholder="Ex: Mon ciblage Alsace", key="save_search_name", label_visibility="collapsed")
+            if st.button("💾 Sauvegarder la recherche actuelle", use_container_width=True, key="btn_save_search"):
+                if search_name.strip():
+                    current_filters = st.session_state.get("filters", {})
+                    save_search(search_name.strip(), current_filters)
+                    st.session_state.pop("saved_searches_cache", None)
+                    st.success(f"Recherche « {search_name} » sauvegardée !")
+                    st.rerun()
+                else:
+                    st.warning("Donnez un nom à votre recherche.")
+        with del_col:
+            if saved_searches:
+                search_names_map = {s["name"]: s["id"] for s in saved_searches}
+                to_delete = st.selectbox("Supprimer une recherche", options=[""] + list(search_names_map.keys()), key="del_search_select", label_visibility="collapsed")
+                if to_delete and st.button("🗑️ Supprimer", use_container_width=True, key="btn_del_search"):
+                    delete_saved_search(search_names_map[to_delete])
+                    st.session_state.pop("saved_searches_cache", None)
+                    st.success(f"Recherche « {to_delete} » supprimée.")
+                    st.rerun()
+            else:
+                st.markdown(f'<p style="font-size:12px;color:{t["text_secondary"]};">Aucune recherche sauvegardée</p>', unsafe_allow_html=True)
 
     preset_zones = st.session_state.pop("preset_zones", None)
     preset_regions = st.session_state.pop("preset_regions", None)
     preset_periods = st.session_state.pop("preset_periods", None)
     preset_lots = st.session_state.pop("preset_lots", None)
     preset_qpv = st.session_state.pop("preset_qpv", None)
+    preset_departments = st.session_state.pop("preset_departments", None)
 
     render_divider()
 
@@ -199,10 +243,13 @@ if st.session_state["current_step"] == 1:
             else:
                 available_depts = sorted(DEPARTMENTS_NAMES.keys())
             dept_options = [DEPARTMENTS_NAMES[d] for d in available_depts if d in DEPARTMENTS_NAMES]
+            dept_default = []
+            if preset_departments:
+                dept_default = [DEPARTMENTS_NAMES[d] for d in preset_departments if d in DEPARTMENTS_NAMES and DEPARTMENTS_NAMES[d] in dept_options]
             selected_dept_labels = st.multiselect(
                 "Départements",
                 options=dept_options,
-                default=[],
+                default=dept_default,
                 placeholder="Tous les départements...",
             )
             selected_departments = [lbl.split(" - ")[0] for lbl in selected_dept_labels]
@@ -268,6 +315,17 @@ if st.session_state["current_step"] == 1:
             unsafe_allow_html=True,
         )
 
+    # Keep current filters in session for save feature
+    st.session_state["filters"] = {
+        "zones": selected_zones,
+        "regions": selected_regions,
+        "departments": selected_departments,
+        "lots": list(selected_lots),
+        "periods": selected_periods,
+        "exclude_big": exclude_big,
+        "qpv": qpv_only,
+    }
+
     # ── CTA ───────────────────────────────────────────────────
     if st.button("TROUVER LES SYNDICS", type="primary", use_container_width=True):
         with st.spinner("Analyse du gisement en cours..."):
@@ -281,15 +339,6 @@ if st.session_state["current_step"] == 1:
                 regions=selected_regions,
                 departments=selected_departments,
             )
-            st.session_state["filters"] = {
-                "zones": selected_zones,
-                "regions": selected_regions,
-                "departments": selected_departments,
-                "lots": selected_lots,
-                "periods": selected_periods,
-                "exclude_big": exclude_big,
-                "qpv": qpv_only,
-            }
             go_to_step(2)
 
 
