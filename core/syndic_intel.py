@@ -436,8 +436,8 @@ class SyndicIntelligence:
     def google_search(self, name, city=""):
         """Run Google searches with city context and return up to 5 deduplicated organic results."""
         queries = [
-            f'"{name}" syndic',
-            f'"{name}" syndic {city}'.strip(),
+            f'{name} syndic',
+            f'{name} syndic {city}'.strip(),
         ]
         all_results = []
         seen_links = set()
