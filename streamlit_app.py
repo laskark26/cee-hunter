@@ -759,6 +759,19 @@ elif st.session_state["current_step"] == 3:
 
                 st.markdown(f"**Domaine identifié :** `{identified_domain or 'Aucun'}` (source: `{domain_source}`)")
 
+                domain_scores = intel_data.get("domain_scores", [])
+                if domain_scores:
+                    st.markdown("**Scores d'identification du domaine :**")
+                    for ds in sorted(domain_scores, key=lambda x: x.get("total", 0), reverse=True):
+                        d = ds.get("domain", "?")
+                        is_winner = "**" if d == identified_domain else ""
+                        st.markdown(
+                            f"- {is_winner}`{d}`{is_winner} — "
+                            f"fuzzy:{ds.get('fuzzy', 0)} + src:{ds.get('src_bonus', 0)} + "
+                            f"freq:{ds.get('freq_bonus', 0)} + title:{ds.get('title_bonus', 0)} + "
+                            f"pos:{ds.get('pos_bonus', 0)} = **{ds.get('total', 0)}**"
+                        )
+
                 serp_queries = intel_data.get("serp_queries", [])
                 if serp_queries:
                     queries_str = " · ".join(f'`{q}`' for q in serp_queries)

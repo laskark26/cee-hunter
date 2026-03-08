@@ -38,6 +38,7 @@ URL_BLACKLIST = [
     "vicinorum.com", "annuairedescoproprietes.fr",
     "meilleurecopro.com", "coproprietes.lexposia.com",
     "le-comptoir-de-la-copropriete.fr",
+    "seloger.com", "leboncoin.fr", "logic-immo.com", "bienici.com",
 ]
 
 PAGE_BLACKLIST_KEYWORDS = [
@@ -830,39 +831,71 @@ class SyndicIntelligence:
             if d and not any(bl in d for bl in URL_BLACKLIST):
                 candidates.append(("google_maps", d))
 
-        for r in serp_results:
+        serp_title_map = {}
+        for idx, r in enumerate(serp_results):
             d = self._clean_domain(r.get("link", ""))
             if d and not any(bl in d for bl in URL_BLACKLIST):
                 candidates.append(("serp", d))
+                if d not in serp_title_map:
+                    serp_title_map[d] = {"title": r.get("title", ""), "position": idx}
 
         clean_name = re.sub(r'[^a-zA-Z0-9]', '', name.lower())
+        clean_name_spaced = re.sub(r'[^a-zA-Z0-9 ]', '', name.lower())
         best_domain = None
         best_score = 0
         best_source = "unknown"
+        domain_scores_debug = []
 
         from collections import Counter
         domain_freq = Counter(d for _, d in candidates if _ == "serp")
 
+        seen_domains = set()
         for source, domain in candidates:
+            if domain in seen_domains and source == "serp":
+                continue
+            seen_domains.add(domain)
+
             domain_name = domain.split('.')[0]
             domain_clean = re.sub(r'[^a-zA-Z0-9]', '', domain_name.lower())
             score = fuzz.partial_ratio(clean_name, domain_clean)
             source_bonus = {"pappers": 15, "google_maps": 12, "pappers_email": 8, "serp": 0}.get(source, 0)
             freq_bonus = min((domain_freq.get(domain, 0) - 1) * 10, 20)
-            total = score + source_bonus + freq_bonus
+
+            title_bonus = 0
+            position_bonus = 0
+            if domain in serp_title_map:
+                title = serp_title_map[domain]["title"]
+                title_clean = re.sub(r'[^a-zA-Z0-9 ]', '', title.lower())
+                title_score = fuzz.token_set_ratio(clean_name_spaced, title_clean)
+                if title_score >= 80:
+                    title_bonus = 15
+                elif title_score >= 60:
+                    title_bonus = 8
+                pos = serp_title_map[domain]["position"]
+                position_bonus = max(10 - pos * 3, 0)
+
+            total = score + source_bonus + freq_bonus + title_bonus + position_bonus
+            domain_scores_debug.append({
+                "domain": domain, "source": source, "fuzzy": round(score),
+                "src_bonus": source_bonus, "freq_bonus": freq_bonus,
+                "title_bonus": title_bonus, "pos_bonus": position_bonus, "total": round(total),
+            })
             if total > best_score:
                 best_score = total
                 best_domain = domain
                 best_source = source
 
-        if best_score >= 45:
-            return best_domain, best_source
+        for ds in sorted(domain_scores_debug, key=lambda x: x["total"], reverse=True):
+            print(f"DEBUG domain score: {ds}")
 
-        # Fallback: trust Google Maps URL if available (very reliable source)
+        if best_score >= 45:
+            return best_domain, best_source, domain_scores_debug
+
+        # Fallback: trust Google Maps URL if available
         for source, domain in candidates:
             if source == "google_maps":
                 print(f"DEBUG: Domain fallback to Google Maps: {domain} (best fuzzy score was {best_score})")
-                return domain, "google_maps_fallback"
+                return domain, "google_maps_fallback", domain_scores_debug
 
         # Fallback: take the most common SERP domain
         serp_domains = [d for s, d in candidates if s == "serp"]
@@ -870,9 +903,9 @@ class SyndicIntelligence:
             most_common = domain_freq.most_common(1)[0]
             if most_common[1] >= 2:
                 print(f"DEBUG: Domain fallback to most common SERP domain: {most_common[0]} (appeared {most_common[1]}x)")
-                return most_common[0], "serp_fallback"
+                return most_common[0], "serp_fallback", domain_scores_debug
 
-        return None, "none"
+        return None, "none", domain_scores_debug
 
     # ── Apollo Contacts ──────────────────────────────────────
 
@@ -1117,8 +1150,9 @@ class SyndicIntelligence:
             _status(f"[3/7] Domaine fourni rejeté (blacklist) : {domain}")
             domain = None
         _status(f"[3/7] Identification du domaine (fourni: {domain or 'aucun'})...")
+        domain_scores = []
         if not domain:
-            domain, domain_source = self.identify_domain(serp_results, name, pappers_data, maps_data)
+            domain, domain_source, domain_scores = self.identify_domain(serp_results, name, pappers_data, maps_data)
             _status(f"[3/7] Domaine identifié : {domain or 'aucun'} (source: {domain_source})")
         else:
             domain_source = "provided"
@@ -1192,6 +1226,7 @@ class SyndicIntelligence:
             "serp_queries": serp_queries,
             "identified_domain": domain or "",
             "domain_source": domain_source,
+            "domain_scores": domain_scores,
             "scraped_contacts_json": scraped_contacts,
         }
 
