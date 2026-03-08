@@ -839,7 +839,18 @@ class SyndicIntelligence:
                 if d not in serp_title_map:
                     serp_title_map[d] = {"title": r.get("title", ""), "position": idx}
 
+        GENERIC_DOMAIN_WORDS = {
+            'immobilier', 'immobiliere', 'immo', 'agence', 'syndic', 'gestion',
+            'cabinet', 'groupe', 'societe', 'copropriete', 'patrimoine', 'habitat',
+            'residence', 'foncier', 'fonciere', 'sa', 'sas', 'sarl', 'sci',
+        }
+
+        def _strip_generic(text):
+            words = re.sub(r'[^a-zA-Z0-9 ]', '', text.lower()).split()
+            return ''.join(w for w in words if w not in GENERIC_DOMAIN_WORDS and len(w) > 1)
+
         clean_name = re.sub(r'[^a-zA-Z0-9]', '', name.lower())
+        clean_name_no_generic = _strip_generic(name)
         clean_name_spaced = re.sub(r'[^a-zA-Z0-9 ]', '', name.lower())
         best_domain = None
         best_score = 0
@@ -855,9 +866,15 @@ class SyndicIntelligence:
                 continue
             seen_domains.add(domain)
 
-            domain_name = domain.split('.')[0]
+            domain_name = domain.split('.')[0].replace('-', ' ')
             domain_clean = re.sub(r'[^a-zA-Z0-9]', '', domain_name.lower())
-            score = fuzz.partial_ratio(clean_name, domain_clean)
+            domain_no_generic = _strip_generic(domain_name)
+
+            score_raw = fuzz.partial_ratio(clean_name, domain_clean)
+            score_clean = fuzz.partial_ratio(clean_name_no_generic, domain_no_generic) if (clean_name_no_generic and domain_no_generic) else 0
+            score = score_clean if clean_name_no_generic else score_raw
+            if score_raw > score and clean_name == clean_name_no_generic:
+                score = score_raw
             source_bonus = {"pappers": 15, "google_maps": 12, "pappers_email": 8, "serp": 0}.get(source, 0)
             freq_bonus = min((domain_freq.get(domain, 0) - 1) * 10, 20)
 
