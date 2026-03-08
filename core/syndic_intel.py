@@ -420,7 +420,7 @@ class SyndicIntelligence:
         to_visit = [base_url]
         page_count = 0
 
-        while to_visit and len(visited) < self.MAX_PAGES:
+        while to_visit and page_count < self.MAX_PAGES:
             url = to_visit.pop(0)
             if url in visited:
                 continue
@@ -440,7 +440,7 @@ class SyndicIntelligence:
                 all_phones.update(page_phones)
                 all_emails.update(page_emails)
 
-                if len(visited) < self.MAX_PAGES:
+                if page_count < self.MAX_PAGES:
                     for link in soup.find_all("a", href=True):
                         href = link["href"]
                         if href.startswith("javascript:") or href.startswith("#") or href.startswith("mailto:") or href.startswith("tel:"):
