@@ -13,14 +13,12 @@ from rapidfuzz import fuzz
 
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_syndic_intel"
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 DEFAULT_TTL_DAYS = 30
 
-# ── ScraperAPI Configuration ─────────────────────────────
-SCRAPERAPI_KEY = st.secrets.get("SCRAPERAPI_KEY", os.environ.get("SCRAPERAPI_KEY", ""))
-SCRAPERAPI_SERP_URL = "https://api.scraperapi.com/structured/google/search"
-SCRAPERAPI_MAPS_URL = "https://api.scraperapi.com/structured/google/mapssearch"
-SCRAPERAPI_SCRAPE_URL = "https://api.scraperapi.com"
+# ── SerpApi Configuration ─────────────────────────────────
+SERPAPI_KEY = st.secrets.get("SERPAPI_KEY", os.environ.get("SERPAPI_KEY", ""))
+SERPAPI_BASE_URL = "https://serpapi.com/search.json"
 
 URL_BLACKLIST = [
     "pagesjaunes.fr", "societe.com", "linkedin.com", "facebook.com",
@@ -184,7 +182,7 @@ class SyndicIntelligence:
         self.bq_client = get_bigquery_client()
         self.openai_client = get_openai_client()
         self.apollo_key = _get_apollo_api_key()
-        self.scraperapi_key = SCRAPERAPI_KEY
+        self.serpapi_key = SERPAPI_KEY
 
     # ── Cache ────────────────────────────────────────────────
 
@@ -229,24 +227,24 @@ class SyndicIntelligence:
         except Exception as e:
             print(f"Intel cache save error: {e}")
 
-    # ── ScraperAPI: Google SERP Search ────────────────────────
+    # ── SerpApi: Google SERP Search ─────────────────────────
 
     def _serp_search(self, query_str, num_results=5):
-        """Single Google SERP search via ScraperAPI. Returns list of organic results."""
-        if not self.scraperapi_key:
-            print("DEBUG: ScraperAPI key missing, skipping SERP search")
+        """Single Google SERP search via SerpApi. Returns list of organic results."""
+        if not self.serpapi_key:
+            print("DEBUG: SerpApi key missing, skipping SERP search")
             return []
         try:
             params = {
-                "api_key": self.scraperapi_key,
-                "query": query_str,
-                "tld": "fr",
-                "country_code": "fr",
-                "gl": "FR",
+                "engine": "google",
+                "api_key": self.serpapi_key,
+                "q": query_str,
+                "google_domain": "google.fr",
+                "gl": "fr",
                 "hl": "fr",
                 "num": str(num_results),
             }
-            resp = requests.get(SCRAPERAPI_SERP_URL, params=params, timeout=60)
+            resp = requests.get(SERPAPI_BASE_URL, params=params, timeout=60)
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("organic_results", [])
@@ -284,12 +282,12 @@ class SyndicIntelligence:
 
         return all_results[:5]
 
-    # ── ScraperAPI: Google Maps Search ────────────────────────
+    # ── SerpApi: Google Maps Search ─────────────────────────
 
     def google_maps_search(self, name, city="", lat=None, lon=None):
-        """Search Google Maps for the syndic and return structured data."""
-        if not self.scraperapi_key:
-            print("DEBUG: ScraperAPI key missing, skipping Maps search")
+        """Search Google Maps for the syndic via SerpApi and return structured data."""
+        if not self.serpapi_key:
+            print("DEBUG: SerpApi key missing, skipping Maps search")
             return None
         latitude = lat or 48.8566
         longitude = lon or 2.3522
@@ -297,15 +295,17 @@ class SyndicIntelligence:
 
         try:
             params = {
-                "api_key": self.scraperapi_key,
-                "query": query_str,
-                "latitude": str(latitude),
-                "longitude": str(longitude),
+                "engine": "google_maps",
+                "api_key": self.serpapi_key,
+                "q": query_str,
+                "ll": f"@{latitude},{longitude},14z",
+                "hl": "fr",
+                "type": "search",
             }
-            resp = requests.get(SCRAPERAPI_MAPS_URL, params=params, timeout=60)
+            resp = requests.get(SERPAPI_BASE_URL, params=params, timeout=60)
             if resp.status_code == 200:
                 data = resp.json()
-                results = data.get("results", [])
+                results = data.get("local_results", [])
                 if not results:
                     print(f"DEBUG: Google Maps returned 0 results for '{query_str}'")
                     return None
@@ -313,14 +313,15 @@ class SyndicIntelligence:
                 best = self._find_best_maps_match(results, name)
                 if best:
                     return {
-                        "name": best.get("name", ""),
-                        "address": best.get("address_line", ""),
-                        "stars": best.get("stars"),
-                        "ratings": best.get("ratings"),
+                        "name": best.get("title", ""),
+                        "address": best.get("address", ""),
+                        "stars": best.get("rating"),
+                        "ratings": best.get("reviews"),
                         "phone": best.get("phone", ""),
-                        "url": best.get("url", ""),
-                        "type": best.get("type", []),
-                        "open": best.get("open", {}),
+                        "url": best.get("website", ""),
+                        "type": best.get("types", best.get("type", [])),
+                        "open": best.get("operating_hours", {}),
+                        "place_id": best.get("place_id", ""),
                     }
             else:
                 print(f"DEBUG: Maps search failed ({resp.status_code}): {resp.text[:200]}")
@@ -334,7 +335,7 @@ class SyndicIntelligence:
         best_score = 0
         best_result = None
         for r in results[:10]:
-            r_name = re.sub(r'[^a-zA-Z0-9\s]', '', (r.get("name") or "").lower())
+            r_name = re.sub(r'[^a-zA-Z0-9\s]', '', (r.get("title") or "").lower())
             score = fuzz.partial_ratio(clean_name, r_name)
             if score > best_score:
                 best_score = score
@@ -343,7 +344,7 @@ class SyndicIntelligence:
             return best_result
         return results[0] if results else None
 
-    # ── ScraperAPI: Web Scraping (proxy) ──────────────────────
+    # ── Web Scraping (BeautifulSoup direct) ─────────────────
 
     def _extract_contact_info(self, soup):
         """Extract phones and emails from HTML."""
@@ -388,20 +389,13 @@ class SyndicIntelligence:
         return any(kw in lower for kw in PAGE_PRIORITY_KEYWORDS)
 
     def _scrape_single_page(self, url):
-        """Scrape a single page via ScraperAPI proxy."""
-        if self.scraperapi_key:
-            params = {
-                "api_key": self.scraperapi_key,
-                "url": url,
-                "country_code": "fr",
-            }
-            return requests.get(SCRAPERAPI_SCRAPE_URL, params=params, timeout=self.SCRAPE_TIMEOUT)
+        """Scrape a single page directly with requests + BeautifulSoup."""
         return requests.get(url, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }, timeout=self.SCRAPE_TIMEOUT, allow_redirects=True)
 
     def scrape_website(self, domain):
-        """Scrape the syndic website using ScraperAPI as proxy."""
+        """Scrape the syndic website using direct requests + BeautifulSoup."""
         if not domain:
             return "", [], []
         base_url = f"https://{domain}"
@@ -460,7 +454,7 @@ class SyndicIntelligence:
 
         return content, list(all_phones), list(all_emails)
 
-    # ── ScraperAPI: Social & Reputation (via Google SERP) ─────
+    # ── SerpApi: Social & Reputation (via Google SERP) ──────
 
     def search_social_presence(self, name, city=""):
         """Search for social media presence via Google SERP API."""
