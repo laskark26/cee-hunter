@@ -419,6 +419,7 @@ class SyndicIntelligence:
                 "google_domain": "google.fr",
                 "gl": "fr",
                 "hl": "fr",
+                "location": "France",
                 "num": str(num_results),
             }
             resp = requests.get(SERPAPI_BASE_URL, params=params, timeout=60)
@@ -477,7 +478,9 @@ class SyndicIntelligence:
                 "api_key": self.serpapi_key,
                 "q": query_str,
                 "ll": f"@{latitude},{longitude},14z",
+                "google_domain": "google.fr",
                 "hl": "fr",
+                "location": "France",
                 "type": "search",
             }
             resp = requests.get(SERPAPI_BASE_URL, params=params, timeout=60)
