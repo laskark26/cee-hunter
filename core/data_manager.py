@@ -12,6 +12,23 @@ H1_DEPARTMENTS = [
     "01", "02", "03", "05", "08", "10", "14", "15", "19", "21", "23", "25", "26", "27", "28", "38", "39", "42", "43", "45", "51", "52", "54", "55", "57", "58", "59", "60", "61", "62", "63", "67", "68", "69", "70", "71", "73", "74", "75", "76", "77", "78", "80", "87", "88", "89", "90", "91", "92", "93", "94", "95"
 ]
 
+# Regions Mapping (département -> région administrative)
+REGIONS_DEPARTMENTS = {
+    "Auvergne-Rhône-Alpes": ["01", "03", "07", "15", "26", "38", "42", "43", "63", "69", "73", "74"],
+    "Bourgogne-Franche-Comté": ["21", "25", "39", "58", "70", "71", "89", "90"],
+    "Bretagne": ["22", "29", "35", "56"],
+    "Centre-Val de Loire": ["18", "28", "36", "37", "41", "45"],
+    "Corse": ["2A", "2B"],
+    "Grand Est": ["08", "10", "51", "52", "54", "55", "57", "67", "68", "88"],
+    "Hauts-de-France": ["02", "59", "60", "62", "80"],
+    "Île-de-France": ["75", "77", "78", "91", "92", "93", "94", "95"],
+    "Normandie": ["14", "27", "50", "61", "76"],
+    "Nouvelle-Aquitaine": ["16", "17", "19", "23", "24", "33", "40", "47", "64", "79", "86", "87"],
+    "Occitanie": ["09", "11", "12", "30", "31", "32", "34", "46", "48", "65", "66", "81", "82"],
+    "Pays de la Loire": ["44", "49", "53", "72", "85"],
+    "Provence-Alpes-Côte d'Azur": ["04", "05", "06", "13", "83", "84"],
+}
+
 def get_climate_zone(code_dept):
     """
     Categorizes a French department into a specific climatic zone (H1, H2, H3).
@@ -33,7 +50,7 @@ def get_bigquery_client():
         return bigquery.Client.from_service_account_info(info)
     return bigquery.Client(project=PROJECT_ID)
 
-def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False):
+def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None):
     """
     Constructs a SQL WHERE clause based on UI filters.
     Includes custom logic for construction periods and syndic exclusions.
@@ -94,16 +111,25 @@ def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude
     if climate_zones:
         selected_zones_str = "', '".join(climate_zones)
         conditions.append(f"({zone_case}) IN ('{selected_zones_str}')")
+
+    # 6. Region Filter
+    if regions:
+        dept_list = []
+        for region in regions:
+            dept_list.extend(REGIONS_DEPARTMENTS.get(region, []))
+        if dept_list:
+            dept_str = "', '".join(dept_list)
+            conditions.append(f"code_officiel_departement IN ('{dept_str}')")
         
     return " AND ".join(conditions) if conditions else "1=1", zone_case
 
-def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False):
+def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None):
     """
     Step 2: Aggregated View.
     Returns list of filtered syndics with their total stats.
     """
     client = get_bigquery_client()
-    where_clause, zone_case = build_filter_clause(climate_zones, min_lots, max_lots, periods, exclude_big_syndics, qpv_only)
+    where_clause, zone_case = build_filter_clause(climate_zones, min_lots, max_lots, periods, exclude_big_syndics, qpv_only, regions=regions)
     
     query = f"""
         SELECT 
@@ -127,13 +153,13 @@ def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, ex
         st.error(f"Error fetching aggregations: {e}")
         return pd.DataFrame()
 
-def fetch_data_by_syndic(syndic_name, climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False):
+def fetch_data_by_syndic(syndic_name, climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None):
     """
     Step 3: Detailed View.
     Fetches rows for a specific syndic matching filters.
     """
     client = get_bigquery_client()
-    where_clause, zone_case = build_filter_clause(climate_zones, min_lots, max_lots, periods, exclude_big_syndics, qpv_only)
+    where_clause, zone_case = build_filter_clause(climate_zones, min_lots, max_lots, periods, exclude_big_syndics, qpv_only, regions=regions)
     
     # Escape syndic name for SQL safely
     safe_syndic = syndic_name.replace("'", "\\'")
