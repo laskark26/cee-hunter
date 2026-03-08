@@ -31,6 +31,11 @@ URL_BLACKLIST = [
     "manageo.fr", "score3.fr", "entreprise.lefigaro.fr",
     "syndicompare.com", "syndic-one.com", "cotoit.com", "comparateur-syndic.com",
     "changersyndic.net", "monimmeuble.com", "baticopro.com",
+    "fr.mappy.com", "mappy.com", "waze.com", "viamichelin.fr",
+    "openstreetmap.org", "maps.apple.com", "here.com",
+    "trustpilot.com", "glassdoor.fr", "indeed.fr", "welcometothejungle.com",
+    "wikipedia.org", "wikidata.org",
+    "vicinorum.com", "annuairedescoproprietes.fr",
 ]
 
 PAGE_BLACKLIST_KEYWORDS = [
