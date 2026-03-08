@@ -478,97 +478,33 @@ elif st.session_state['current_step'] == 3:
                 except Exception:
                     analysis = {}
 
-            # Score de prospection
+            # —— 1. KPIs (ligne unique, 3 blocs) ——
             score = analysis.get("score_prospection", "?")
-            score_color = "#10B981" if isinstance(score, (int, float)) and score >= 7 else "#F59E0B" if isinstance(score, (int, float)) and score >= 4 else "#EF4444"
-            maturite = analysis.get("maturite_digitale", "N/A")
-            maturite_color = "#10B981" if maturite == "forte" else "#F59E0B" if maturite == "moyenne" else "#EF4444"
+            score_color = "#10B981" if isinstance(score, (int, float)) and score >= 7 else "#F59E0B" if isinstance(score, (int, float)) and score >= 4 else "#6B7280"
+            maturite = (analysis.get("maturite_digitale") or "").strip() or "—"
+            maturite_color = "#10B981" if maturite == "forte" else "#F59E0B" if maturite == "moyenne" else "#EF4444" if maturite == "faible" else c["sub_text"]
+            taille = (analysis.get("taille_estimee") or "").strip() or "—"
 
-            col_s1, col_s2, col_s3 = st.columns(3)
-            with col_s1:
+            kpi1, kpi2, kpi3 = st.columns(3)
+            with kpi1:
                 st.markdown(f"""<div class="premium-card" style="text-align:center;">
-                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">SCORE PROSPECTION</p>
-                    <p style="font-size:1.8rem; font-weight:800; margin:0; color:{score_color};">{score}/10</p>
+                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">Score prospection</p>
+                    <p style="font-size:1.6rem; font-weight:800; margin:0; color:{score_color};">{score}/10</p>
                 </div>""", unsafe_allow_html=True)
-            with col_s2:
+            with kpi2:
                 st.markdown(f"""<div class="premium-card" style="text-align:center;">
-                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">MATURITÉ DIGITALE</p>
-                    <p style="font-size:1rem; font-weight:700; margin:0.25rem 0 0 0; color:{maturite_color};">{maturite.upper() if maturite else 'N/A'}</p>
+                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">Maturité digitale</p>
+                    <p style="font-size:0.95rem; font-weight:700; margin:0.2rem 0 0 0; color:{maturite_color};">{str(maturite).upper()}</p>
                 </div>""", unsafe_allow_html=True)
-            with col_s3:
-                taille = analysis.get("taille_estimee", "N/A")
+            with kpi3:
                 st.markdown(f"""<div class="premium-card" style="text-align:center;">
-                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">TAILLE ESTIMÉE</p>
-                    <p style="font-size:1rem; font-weight:700; margin:0.25rem 0 0 0;">{taille}</p>
+                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">Taille estimée</p>
+                    <p style="font-size:0.95rem; font-weight:700; margin:0.2rem 0 0 0;">{taille}</p>
                 </div>""", unsafe_allow_html=True)
 
-            # Résumé activité
-            resume = analysis.get("resume_activite", "")
-            if resume:
-                st.markdown(f"""<div class="premium-card">
-                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📋 Résumé</p>
-                    <p style="font-size:0.8rem; margin:0;">{resume}</p>
-                </div>""", unsafe_allow_html=True)
-
-            # Réseaux sociaux
-            socials = analysis.get("reseaux_sociaux", {})
-            if socials:
-                social_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🌐 Présence Web</p>'
-                for platform, info in socials.items():
-                    if isinstance(info, dict):
-                        url = info.get("url", "")
-                        actif = info.get("actif", False)
-                        icon = "🟢" if actif else "🔴"
-                        label = platform.replace("_", " ").title()
-                        if url:
-                            social_html += f'<p style="font-size:0.75rem; margin:0;">{icon} <b>{label}</b>: <a href="{url}" target="_blank" style="color:{c["accent"]};">{url[:50]}...</a></p>'
-                        else:
-                            social_html += f'<p style="font-size:0.75rem; margin:0;">{icon} <b>{label}</b>: Non trouvé</p>'
-                        note = info.get("note", "")
-                        nb_avis = info.get("nb_avis", "")
-                        if note or nb_avis:
-                            social_html += f'<p style="font-size:0.7rem; margin:0; color:{c["sub_text"]};">&nbsp;&nbsp;&nbsp;Note: {note} ({nb_avis} avis)</p>'
-                social_html += '</div>'
-                st.markdown(social_html, unsafe_allow_html=True)
-
-            # Points forts / faibles
-            col_pf, col_pw = st.columns(2)
-            with col_pf:
-                points_forts = analysis.get("points_forts", [])
-                if points_forts:
-                    html_pf = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">✅ Points forts</p>'
-                    for pf in points_forts:
-                        html_pf += f'<p style="font-size:0.75rem; margin:0;">• {pf}</p>'
-                    html_pf += '</div>'
-                    st.markdown(html_pf, unsafe_allow_html=True)
-            with col_pw:
-                points_faibles = analysis.get("points_faibles", [])
-                if points_faibles:
-                    html_pw = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">⚠️ Points faibles</p>'
-                    for pw in points_faibles:
-                        html_pw += f'<p style="font-size:0.75rem; margin:0;">• {pw}</p>'
-                    html_pw += '</div>'
-                    st.markdown(html_pw, unsafe_allow_html=True)
-
-            # Angle d'approche
-            angle = analysis.get("angle_approche_recommande", "")
-            if angle:
-                st.markdown(f"""<div class="premium-card" style="border-left: 3px solid {c['accent']};">
-                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🎯 Angle d'approche recommandé</p>
-                    <p style="font-size:0.8rem; margin:0;">{angle}</p>
-                </div>""", unsafe_allow_html=True)
-
-            # Reputation
-            reputation = analysis.get("reputation_en_ligne", "")
-            if reputation:
-                st.markdown(f"""<div class="premium-card">
-                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">💬 Réputation en ligne</p>
-                    <p style="font-size:0.8rem; margin:0;">{reputation}</p>
-                </div>""", unsafe_allow_html=True)
-
-            # Telephone & Email principaux + scraped from website
-            tel_principal = analysis.get("telephone_principal", "")
-            email_principal = analysis.get("email_principal", "")
+            # —— 2. Coordonnées (tél / email) ——
+            tel_principal = analysis.get("telephone_principal", "") or ""
+            email_principal = analysis.get("email_principal", "") or ""
             scraped_phones = intel_data.get("scraped_phones", [])
             scraped_emails = intel_data.get("scraped_emails", [])
             if isinstance(scraped_phones, str):
@@ -580,71 +516,131 @@ elif st.session_state['current_step'] == 3:
 
             has_contact_info = tel_principal or email_principal or scraped_phones or scraped_emails
             if has_contact_info:
-                contact_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📞 Coordonnées</p>'
+                contact_lines = []
                 if tel_principal:
-                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Tél principal : <b>{tel_principal}</b></p>'
+                    contact_lines.append(f"Tél : <b>{tel_principal}</b>")
+                for p in (scraped_phones or []):
+                    if p and p != (tel_principal or "").replace(" ", "").replace(".", ""):
+                        contact_lines.append(f"Tél (site) : {p}")
+                        break
                 if email_principal:
-                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Email principal : <b>{email_principal}</b></p>'
-                if scraped_phones:
-                    extra_phones = [p for p in scraped_phones if p != tel_principal.replace(" ", "").replace(".", "")]
-                    if extra_phones:
-                        contact_html += f'<p style="font-size:0.75rem; margin:0.15rem 0 0 0; color:{c["sub_text"]};">Tél (site web) : {", ".join(extra_phones)}</p>'
-                if scraped_emails:
-                    extra_emails = [e for e in scraped_emails if e != (email_principal or "").lower()]
-                    if extra_emails:
-                        contact_html += f'<p style="font-size:0.75rem; margin:0.15rem 0 0 0; color:{c["sub_text"]};">Emails (site web) : {", ".join(extra_emails)}</p>'
-                contact_html += '</div>'
+                    contact_lines.append(f"Email : <b>{email_principal}</b>")
+                for e in (scraped_emails or [])[:2]:
+                    if e and e != (email_principal or "").lower():
+                        contact_lines.append(f"Email (site) : {e}")
+                        break
+                contact_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.35rem 0;">Coordonnées</p><p style="font-size:0.8rem; margin:0; line-height:1.4;">' + " &nbsp;·&nbsp; ".join(contact_lines) + '</p></div>'
                 st.markdown(contact_html, unsafe_allow_html=True)
 
-            # Contacts cles (from LLM analysis of Apollo data)
-            contacts_cles = analysis.get("contacts_cles", [])
+            # —— 3. Résumé + Angle d'approche ——
+            resume = (analysis.get("resume_activite") or "").strip()
+            angle = (analysis.get("angle_approche_recommande") or "").strip()
+            if resume:
+                st.markdown(f"""<div class="premium-card">
+                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Résumé</p>
+                    <p style="font-size:0.8rem; margin:0; line-height:1.35;">{resume}</p>
+                </div>""", unsafe_allow_html=True)
+            if angle:
+                st.markdown(f"""<div class="premium-card" style="border-left:3px solid {c['accent']};">
+                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Angle d'approche recommandé</p>
+                    <p style="font-size:0.8rem; margin:0; line-height:1.35;">{angle}</p>
+                </div>""", unsafe_allow_html=True)
+
+            # —— 4. Points forts | Points faibles (masquer "Analyse LLM indisponible" seul) ——
+            points_forts = [x for x in (analysis.get("points_forts") or []) if isinstance(x, str) and x.strip()]
+            points_faibles = [x for x in (analysis.get("points_faibles") or []) if isinstance(x, str) and x.strip() and "LLM indisponible" not in x]
+            if points_forts or points_faibles:
+                col_pf, col_pw = st.columns(2)
+                with col_pf:
+                    if points_forts:
+                        pf_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Points forts</p>'
+                        for pf in points_forts:
+                            pf_html += f'<p style="font-size:0.78rem; margin:0.1rem 0;">· {pf}</p>'
+                        pf_html += '</div>'
+                        st.markdown(pf_html, unsafe_allow_html=True)
+                with col_pw:
+                    if points_faibles:
+                        pw_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Points faibles</p>'
+                        for pw in points_faibles:
+                            pw_html += f'<p style="font-size:0.78rem; margin:0.1rem 0;">· {pw}</p>'
+                        pw_html += '</div>'
+                        st.markdown(pw_html, unsafe_allow_html=True)
+
+            # —— 5. Présence Web (seulement si au moins une URL) ——
+            socials = analysis.get("reseaux_sociaux") or {}
+            has_social_urls = any(isinstance(v, dict) and v.get("url") for v in socials.values())
+            if has_social_urls:
+                social_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Présence web</p>'
+                for platform, info in socials.items():
+                    if not isinstance(info, dict):
+                        continue
+                    url = info.get("url", "")
+                    if not url:
+                        continue
+                    label = platform.replace("_", " ").title()
+                    actif = info.get("actif", False)
+                    dot = "●" if actif else "○"
+                    social_html += f'<p style="font-size:0.78rem; margin:0.15rem 0;">{dot} <b>{label}</b> <a href="{url}" target="_blank" rel="noopener" style="color:{c["accent"]};">{url[:45]}{"…" if len(url)>45 else ""}</a></p>'
+                social_html += '</div>'
+                st.markdown(social_html, unsafe_allow_html=True)
+
+            # —— 6. Réputation (si présente) ——
+            reputation = (analysis.get("reputation_en_ligne") or "").strip()
+            if reputation and reputation.lower() not in ("non analysée", "aucun avis trouvé"):
+                st.markdown(f"""<div class="premium-card">
+                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Réputation en ligne</p>
+                    <p style="font-size:0.8rem; margin:0; line-height:1.35;">{reputation}</p>
+                </div>""", unsafe_allow_html=True)
+
+            # —— 7. Contacts clés (prospection CEE) ——
+            contacts_cles = [x for x in (analysis.get("contacts_cles") or []) if isinstance(x, dict) and (x.get("nom") or x.get("email") or x.get("telephone"))]
             if contacts_cles:
-                ck_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">👥 Contacts clés pour la prospection CEE</p>'
+                ck_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.35rem 0;">Contacts clés (prospection CEE)</p>'
                 for ck in contacts_cles[:5]:
-                    if isinstance(ck, dict):
-                        nom = ck.get("nom", "")
-                        poste = ck.get("poste", "")
-                        ck_email = ck.get("email", "")
-                        ck_tel = ck.get("telephone", "")
-                        ck_li = ck.get("linkedin", "")
-                        pertinence = ck.get("pertinence_cee", "")
-                        ck_html += f'<div style="border-top:1px solid {c["card_border"]}; padding:0.3rem 0; margin-top:0.2rem;">'
-                        ck_html += f'<p style="font-size:0.8rem; margin:0;"><b>{nom}</b> — {poste}</p>'
-                        details_parts = []
-                        if ck_email:
-                            details_parts.append(f'📧 {ck_email}')
-                        if ck_tel:
-                            details_parts.append(f'📞 {ck_tel}')
-                        if ck_li:
-                            details_parts.append(f'<a href="{ck_li}" target="_blank" style="color:{c["accent"]};">LinkedIn</a>')
-                        if details_parts:
-                            ck_html += f'<p style="font-size:0.7rem; margin:0; color:{c["sub_text"]};">{" &nbsp;•&nbsp; ".join(details_parts)}</p>'
-                        if pertinence:
-                            ck_html += f'<p style="font-size:0.7rem; margin:0; color:{c["sub_text"]}; font-style:italic;">→ {pertinence}</p>'
-                        ck_html += '</div>'
+                    nom = (ck.get("nom") or "").strip() or "—"
+                    poste = (ck.get("poste") or "").strip()
+                    ck_email = (ck.get("email") or "").strip()
+                    ck_tel = (ck.get("telephone") or "").strip()
+                    ck_li = (ck.get("linkedin") or "").strip()
+                    ck_html += f'<div style="border-top:1px solid {c["card_border"]}; padding:0.35rem 0; margin-top:0.2rem;">'
+                    ck_html += f'<p style="font-size:0.8rem; margin:0;"><b>{nom}</b>' + (f' — {poste}' if poste else '') + '</p>'
+                    parts = []
+                    if ck_email:
+                        parts.append(f'📧 {ck_email}')
+                    if ck_tel:
+                        parts.append(f'📞 {ck_tel}')
+                    if ck_li:
+                        parts.append(f'<a href="{ck_li}" target="_blank" rel="noopener" style="color:{c["accent"]};">LinkedIn</a>')
+                    if parts:
+                        ck_html += f'<p style="font-size:0.72rem; margin:0.15rem 0 0 0; color:{c["sub_text"]};">{" · ".join(parts)}</p>'
+                    pertinence = (ck.get("pertinence_cee") or "").strip()
+                    if pertinence:
+                        ck_html += f'<p style="font-size:0.7rem; margin:0.1rem 0 0 0; color:{c["sub_text"]}; font-style:italic;">{pertinence}</p>'
+                    ck_html += '</div>'
                 ck_html += '</div>'
                 st.markdown(ck_html, unsafe_allow_html=True)
 
-            # Services & Zones
-            services = analysis.get("services_proposes", [])
-            zones = analysis.get("zones_geographiques", [])
+            # —— 8. Services & Zones (une ligne si présents) ——
+            services = [s for s in (analysis.get("services_proposes") or []) if isinstance(s, str) and s.strip()]
+            zones = [z for z in (analysis.get("zones_geographiques") or []) if isinstance(z, str) and z.strip()]
             if services or zones:
-                col_sv, col_zn = st.columns(2)
-                with col_sv:
+                row_s, row_z = st.columns(2)
+                with row_s:
                     if services:
                         st.markdown(f"""<div class="premium-card">
-                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🔧 Services</p>
-                            <p style="font-size:0.75rem; margin:0;">{' • '.join(services)}</p>
+                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Services</p>
+                            <p style="font-size:0.78rem; margin:0;">{' · '.join(services[:8])}</p>
                         </div>""", unsafe_allow_html=True)
-                with col_zn:
+                with row_z:
                     if zones:
                         st.markdown(f"""<div class="premium-card">
-                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📍 Zones géographiques</p>
-                            <p style="font-size:0.75rem; margin:0;">{' • '.join(zones)}</p>
+                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">Zones géographiques</p>
+                            <p style="font-size:0.78rem; margin:0;">{' · '.join(zones[:8])}</p>
                         </div>""", unsafe_allow_html=True)
 
-            # Bouton refresh
-            if st.button("🔄 Réactualiser l'analyse", key="refresh_intel"):
+            # —— 9. Bouton Réactualiser (ligne dédiée, évite le truncate) ——
+            st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
+            if st.button("Réactualiser l'analyse", key="refresh_intel", use_container_width=False):
                 with st.spinner("Réactualisation..."):
                     enrich_key = f"enrich_data_{syndic_siret}"
                     if enrich_key not in st.session_state:
