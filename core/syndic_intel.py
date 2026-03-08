@@ -481,38 +481,63 @@ class SyndicIntelligence:
 
         combined = "\n\n".join(team_pages_text)[:16000]
 
+        system_prompt = (
+            "Tu es un enquêteur commercial d'élite spécialisé dans le secteur immobilier français. "
+            "Ton rôle : identifier les décideurs et contacts clés au sein des syndics de copropriété "
+            "pour permettre une prospection B2B ciblée sur les projets de rénovation énergétique (CEE).\n\n"
+            "Tu travailles pour une entreprise qui aide les copropriétés à réaliser des travaux de "
+            "rénovation énergétique financés par les Certificats d'Économies d'Énergie. "
+            "Pour cela, tu dois identifier les personnes qui prennent les décisions au sein des syndics : "
+            "les gérants, directeurs, responsables syndic et gestionnaires de copropriété.\n\n"
+            "Tu es méticuleux, tu ne rates aucun nom, aucun numéro, aucun email. "
+            "Tu lis entre les lignes : un 'Contactez Nicolas au 03...' est un contact à extraire. "
+            "Un 'dirigé par M. Dupont depuis 20 ans' est un contact à extraire. "
+            "Tu réponds UNIQUEMENT en JSON valide, sans markdown."
+        )
+
         prompt = (
-            "Tu es un assistant spécialisé dans l'extraction de contacts depuis des pages web de syndics de copropriété.\n\n"
-            "Voici le texte brut extrait de pages d'un site de syndic (équipe, contact, conseillers, syndic, direction, accueil) :\n\n"
+            "## Objectif\n\n"
+            "Analyse le texte ci-dessous extrait du site web d'un syndic de copropriété. "
+            "Ton objectif est d'identifier TOUTES les personnes nommées et de reconstituer leur fiche contact "
+            "la plus complète possible (nom, poste, téléphone, email).\n\n"
+            "## Texte extrait du site web\n\n"
             f"{combined}\n\n"
-            "## Instructions d'extraction\n\n"
-            "Extrais TOUS les contacts identifiables, même ceux mentionnés indirectement. Cherche :\n"
-            "- Les noms propres (Prénom NOM ou NOM Prénom) associés à un rôle, un téléphone ou un email\n"
-            "- Les formulations du type 'Contactez X', 'joindre X au...', 'votre interlocuteur : X'\n"
-            "- Les noms dans les fiches de présentation d'équipe, les signatures, les formulaires de contact\n"
-            "- Le directeur/gérant mentionné dans les mentions légales ou la présentation de l'agence\n\n"
-            "Rôles prioritaires pour la prospection CEE :\n"
-            "- Gérants, directeurs, PDG, présidents\n"
-            "- Responsables syndic, gestionnaires de copropriété\n"
-            "- Administrateurs de biens, responsables techniques\n"
-            "- Chargés de clientèle, conseillers, négociateurs\n\n"
-            "IMPORTANT : Si un numéro de téléphone est mentionné à côté d'un nom, associe-le à ce contact.\n"
-            "Si un email est mentionné à côté d'un nom, associe-le à ce contact.\n\n"
+            "## Où chercher les contacts\n\n"
+            "Sois exhaustif. Les contacts se cachent partout :\n"
+            "- **Pages équipe/conseillers** : fiches avec nom, poste, téléphone, email\n"
+            "- **Pages syndic/copropriété** : 'Contactez X au...', 'votre interlocuteur', 'responsable syndic'\n"
+            "- **Page d'accueil** : 'dirigé par...', 'fondé par...', 'son directeur X'\n"
+            "- **Mentions légales** : 'directeur de publication : M./Mme X', 'gérant : X'\n"
+            "- **Formulaires de contact** : 'joindre X au...', 'contacter X par email à...'\n"
+            "- **Signatures et pieds de page** : noms associés à des numéros directs\n\n"
+            "## Hiérarchie des contacts (du plus important au moins important)\n\n"
+            "1. **Direction** : Gérant, PDG, Président, Directeur général, Fondateur\n"
+            "2. **Responsables syndic** : Directeur syndic, Responsable copropriété, Principal de copropriété\n"
+            "3. **Gestionnaires** : Gestionnaire de copropriété, Administrateur de biens\n"
+            "4. **Opérationnels** : Chargé de clientèle, Conseiller, Négociateur, Agent commercial\n"
+            "5. **Support** : Comptable syndic, Assistant(e), Gestionnaire locatif\n\n"
+            "## Règles d'extraction\n\n"
+            "- Extrais CHAQUE personne nommée, même si tu n'as qu'un nom sans téléphone ni email\n"
+            "- Si un téléphone ou email apparaît à proximité d'un nom (même quelques lignes avant/après), associe-le\n"
+            "- Déduis le poste à partir du contexte si non explicitement indiqué (ex: 'dirigé par X' → poste: 'Dirigeant')\n"
+            "- Normalise les noms en 'Prénom Nom' (majuscule initiale)\n"
+            "- Normalise les téléphones au format français (ex: 03 88 39 20 39 ou 06 82 59 65 43)\n"
+            "- Ne confonds pas le standard téléphonique général avec un numéro direct personnel\n\n"
+            "## Format de sortie\n\n"
             "Réponds UNIQUEMENT en JSON valide (sans markdown, sans ```), sous forme de liste :\n"
-            '[{"nom": "Prénom Nom", "poste": "Titre du poste", "email": "si disponible sinon vide", '
-            '"telephone": "si disponible sinon vide", "source": "site_web"}]\n\n'
-            "Si aucun contact n'est identifiable, retourne une liste vide []."
+            '[{"nom": "Prénom Nom", "poste": "Titre du poste", "email": "", "telephone": "", "source": "site_web"}]\n\n'
+            "Si aucun contact n'est identifiable, retourne []."
         )
 
         try:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "Tu extrais des contacts structurés. Réponds uniquement en JSON valide."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
-                max_tokens=2000,
+                max_tokens=3000,
             )
             raw = response.choices[0].message.content.strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
