@@ -404,54 +404,328 @@ elif st.session_state['current_step'] == 3:
         )
         st.session_state['current_syndic_name'] = syndic_name
         
-    tab_intel, tab_parc = st.tabs(["🕵️ Intelligence", "🏢 Parc Immobilier"])
-    
-    with tab_intel:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"""
-                <div class="premium-card">
-                    <p style="font-size:0.8rem; margin:0;"><b>Dirigeant :</b> {pappers_info.get('prenom_dirigeant', '')} {pappers_info.get('nom_dirigeant', '')}</p>
-                    <p style="font-size:0.8rem; margin:0;"><b>CA :</b> {f"{pappers_info.get('ca_annuel', 0)/1000000:.1f} M€" if pappers_info.get('ca_annuel') else 'N/A'}</p>
-                    <p style="font-size:0.75rem; color:{c['sub_text']}; margin:0;">{pappers_info.get('telephone', 'N/A')} • {pappers_info.get('email', 'N/A')}</p>
-                </div>
-            """, unsafe_allow_html=True)
+    tab_intel, tab_contacts, tab_parc = st.tabs(["🕵️ Intelligence", "👥 Contacts", "🏢 Parc Immobilier"])
 
-        with c2:
-            from core.enrichment_manager import EnrichmentManager
-            import json
-            enricher = EnrichmentManager()
-            enrich_key = f"enrich_data_{syndic_siret}"
-            if enrich_key not in st.session_state:
-                cached = enricher.get_cached_data(syndic_siret)
-                if cached: st.session_state[enrich_key] = cached
-            
-            data_enrich = st.session_state.get(enrich_key)
-            if not data_enrich:
-                if st.button("🚀 Lancer l'IA", type="primary", use_container_width=True):
-                    with st.spinner("..."):
+    with tab_intel:
+        from core.syndic_intel import SyndicIntelligence
+        from core.enrichment_manager import EnrichmentManager
+        import json
+
+        intel_engine = SyndicIntelligence()
+        enricher = EnrichmentManager()
+
+        # Fiche entreprise (Pappers)
+        st.markdown(f"""
+            <div class="premium-card">
+                <p style="font-size:0.8rem; margin:0;"><b>Dirigeant :</b> {pappers_info.get('prenom_dirigeant', '')} {pappers_info.get('nom_dirigeant', '')}</p>
+                <p style="font-size:0.8rem; margin:0;"><b>CA :</b> {f"{pappers_info.get('ca_annuel', 0)/1000000:.1f} M€" if pappers_info.get('ca_annuel') else 'N/A'}
+                    &nbsp;•&nbsp; <b>Catégorie :</b> {pappers_info.get('categorie_entreprise', 'N/A')}
+                    &nbsp;•&nbsp; <b>APE :</b> {pappers_info.get('code_ape', 'N/A')}</p>
+                <p style="font-size:0.75rem; color:{c['sub_text']}; margin:0;">
+                    📞 {pappers_info.get('telephone', 'N/A')} &nbsp;•&nbsp; 📧 {pappers_info.get('email', 'N/A')}
+                    &nbsp;•&nbsp; 🌐 {pappers_info.get('sites_internet', 'N/A')}</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Intelligence IA
+        intel_key = f"intel_data_{syndic_siret}"
+        if intel_key not in st.session_state:
+            cached_intel = intel_engine.get_cached_intel(syndic_siret)
+            if cached_intel:
+                st.session_state[intel_key] = cached_intel
+
+        intel_data = st.session_state.get(intel_key)
+
+        if not intel_data:
+            st.markdown("")
+            col_btn, col_refresh = st.columns([3, 1])
+            with col_btn:
+                if st.button("🔬 Lancer l'Intelligence", type="primary", use_container_width=True):
+                    with st.spinner("Analyse en cours... Scraping du site, recherche réseaux sociaux, analyse IA..."):
+                        # Get domain from enrichment or pappers
+                        enrich_key = f"enrich_data_{syndic_siret}"
+                        if enrich_key not in st.session_state:
+                            cached_enrich = enricher.get_cached_data(syndic_siret)
+                            if cached_enrich:
+                                st.session_state[enrich_key] = cached_enrich
+                        domain = None
+                        enrich_data = st.session_state.get(enrich_key)
+                        if enrich_data:
+                            domain = enrich_data.get("domain")
+                        if not domain and pappers_info:
+                            sites = pappers_info.get("sites_internet", "")
+                            if sites:
+                                domain = sites.split(",")[0].strip().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+
                         city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
-                        fresh = enricher.enrich_syndic(syndic_siret, syndic_name, city, pappers_data=pappers_info)
-                        if fresh: st.session_state[enrich_key] = fresh; st.rerun()
-            else:
-                contacts = data_enrich.get('contacts_json', [])
-                if isinstance(contacts, str):
-                    try: contacts = json.loads(contacts)
-                    except: contacts = []
-                
-                for idx, ct in enumerate(contacts[:2]):
-                    with st.container(border=True):
-                        col_ct, col_act = st.columns([3, 1])
-                        col_ct.markdown(f"**{ct.get('first_name')}** ({ct.get('title') or 'Lead'})")
-                        if col_act.button("🎯", key=f"sel_{idx}"):
-                            st.session_state['selected_contact'] = ct
-                            go_to_step(4)
+                        result = intel_engine.run_intelligence(
+                            siret=syndic_siret,
+                            name=syndic_name,
+                            city=city,
+                            domain=domain,
+                            pappers_data=pappers_info,
+                            nb_copros=int(syndic_row.get('nb_copros', 0)),
+                            total_lots=int(syndic_row.get('total_lots', 0)),
+                        )
+                        if result:
+                            st.session_state[intel_key] = result
+                            st.rerun()
+        else:
+            analysis = intel_data.get("llm_analysis_json", {})
+            if isinstance(analysis, str):
+                try:
+                    analysis = json.loads(analysis)
+                except Exception:
+                    analysis = {}
+
+            # Score de prospection
+            score = analysis.get("score_prospection", "?")
+            score_color = "#10B981" if isinstance(score, (int, float)) and score >= 7 else "#F59E0B" if isinstance(score, (int, float)) and score >= 4 else "#EF4444"
+            maturite = analysis.get("maturite_digitale", "N/A")
+            maturite_color = "#10B981" if maturite == "forte" else "#F59E0B" if maturite == "moyenne" else "#EF4444"
+
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                st.markdown(f"""<div class="premium-card" style="text-align:center;">
+                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">SCORE PROSPECTION</p>
+                    <p style="font-size:1.8rem; font-weight:800; margin:0; color:{score_color};">{score}/10</p>
+                </div>""", unsafe_allow_html=True)
+            with col_s2:
+                st.markdown(f"""<div class="premium-card" style="text-align:center;">
+                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">MATURITÉ DIGITALE</p>
+                    <p style="font-size:1rem; font-weight:700; margin:0.25rem 0 0 0; color:{maturite_color};">{maturite.upper() if maturite else 'N/A'}</p>
+                </div>""", unsafe_allow_html=True)
+            with col_s3:
+                taille = analysis.get("taille_estimee", "N/A")
+                st.markdown(f"""<div class="premium-card" style="text-align:center;">
+                    <p style="font-size:0.7rem; margin:0; color:{c['sub_text']};">TAILLE ESTIMÉE</p>
+                    <p style="font-size:1rem; font-weight:700; margin:0.25rem 0 0 0;">{taille}</p>
+                </div>""", unsafe_allow_html=True)
+
+            # Résumé activité
+            resume = analysis.get("resume_activite", "")
+            if resume:
+                st.markdown(f"""<div class="premium-card">
+                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📋 Résumé</p>
+                    <p style="font-size:0.8rem; margin:0;">{resume}</p>
+                </div>""", unsafe_allow_html=True)
+
+            # Réseaux sociaux
+            socials = analysis.get("reseaux_sociaux", {})
+            if socials:
+                social_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🌐 Présence Web</p>'
+                for platform, info in socials.items():
+                    if isinstance(info, dict):
+                        url = info.get("url", "")
+                        actif = info.get("actif", False)
+                        icon = "🟢" if actif else "🔴"
+                        label = platform.replace("_", " ").title()
+                        if url:
+                            social_html += f'<p style="font-size:0.75rem; margin:0;">{icon} <b>{label}</b>: <a href="{url}" target="_blank" style="color:{c["accent"]};">{url[:50]}...</a></p>'
+                        else:
+                            social_html += f'<p style="font-size:0.75rem; margin:0;">{icon} <b>{label}</b>: Non trouvé</p>'
+                        note = info.get("note", "")
+                        nb_avis = info.get("nb_avis", "")
+                        if note or nb_avis:
+                            social_html += f'<p style="font-size:0.7rem; margin:0; color:{c["sub_text"]};">&nbsp;&nbsp;&nbsp;Note: {note} ({nb_avis} avis)</p>'
+                social_html += '</div>'
+                st.markdown(social_html, unsafe_allow_html=True)
+
+            # Points forts / faibles
+            col_pf, col_pw = st.columns(2)
+            with col_pf:
+                points_forts = analysis.get("points_forts", [])
+                if points_forts:
+                    html_pf = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">✅ Points forts</p>'
+                    for pf in points_forts:
+                        html_pf += f'<p style="font-size:0.75rem; margin:0;">• {pf}</p>'
+                    html_pf += '</div>'
+                    st.markdown(html_pf, unsafe_allow_html=True)
+            with col_pw:
+                points_faibles = analysis.get("points_faibles", [])
+                if points_faibles:
+                    html_pw = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">⚠️ Points faibles</p>'
+                    for pw in points_faibles:
+                        html_pw += f'<p style="font-size:0.75rem; margin:0;">• {pw}</p>'
+                    html_pw += '</div>'
+                    st.markdown(html_pw, unsafe_allow_html=True)
+
+            # Angle d'approche
+            angle = analysis.get("angle_approche_recommande", "")
+            if angle:
+                st.markdown(f"""<div class="premium-card" style="border-left: 3px solid {c['accent']};">
+                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🎯 Angle d'approche recommandé</p>
+                    <p style="font-size:0.8rem; margin:0;">{angle}</p>
+                </div>""", unsafe_allow_html=True)
+
+            # Reputation
+            reputation = analysis.get("reputation_en_ligne", "")
+            if reputation:
+                st.markdown(f"""<div class="premium-card">
+                    <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">💬 Réputation en ligne</p>
+                    <p style="font-size:0.8rem; margin:0;">{reputation}</p>
+                </div>""", unsafe_allow_html=True)
+
+            # Telephone & Email principaux
+            tel_principal = analysis.get("telephone_principal", "")
+            email_principal = analysis.get("email_principal", "")
+            if tel_principal or email_principal:
+                contact_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📞 Contact principal</p>'
+                if tel_principal:
+                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Tél : <b>{tel_principal}</b></p>'
+                if email_principal:
+                    contact_html += f'<p style="font-size:0.8rem; margin:0;">Email : <b>{email_principal}</b></p>'
+                contact_html += '</div>'
+                st.markdown(contact_html, unsafe_allow_html=True)
+
+            # Contacts cles (from LLM analysis of Apollo data)
+            contacts_cles = analysis.get("contacts_cles", [])
+            if contacts_cles:
+                ck_html = '<div class="premium-card"><p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">👥 Contacts clés pour la prospection CEE</p>'
+                for ck in contacts_cles[:5]:
+                    if isinstance(ck, dict):
+                        nom = ck.get("nom", "")
+                        poste = ck.get("poste", "")
+                        ck_email = ck.get("email", "")
+                        ck_tel = ck.get("telephone", "")
+                        ck_li = ck.get("linkedin", "")
+                        pertinence = ck.get("pertinence_cee", "")
+                        ck_html += f'<div style="border-top:1px solid {c["card_border"]}; padding:0.3rem 0; margin-top:0.2rem;">'
+                        ck_html += f'<p style="font-size:0.8rem; margin:0;"><b>{nom}</b> — {poste}</p>'
+                        details_parts = []
+                        if ck_email:
+                            details_parts.append(f'📧 {ck_email}')
+                        if ck_tel:
+                            details_parts.append(f'📞 {ck_tel}')
+                        if ck_li:
+                            details_parts.append(f'<a href="{ck_li}" target="_blank" style="color:{c["accent"]};">LinkedIn</a>')
+                        if details_parts:
+                            ck_html += f'<p style="font-size:0.7rem; margin:0; color:{c["sub_text"]};">{" &nbsp;•&nbsp; ".join(details_parts)}</p>'
+                        if pertinence:
+                            ck_html += f'<p style="font-size:0.7rem; margin:0; color:{c["sub_text"]}; font-style:italic;">→ {pertinence}</p>'
+                        ck_html += '</div>'
+                ck_html += '</div>'
+                st.markdown(ck_html, unsafe_allow_html=True)
+
+            # Services & Zones
+            services = analysis.get("services_proposes", [])
+            zones = analysis.get("zones_geographiques", [])
+            if services or zones:
+                col_sv, col_zn = st.columns(2)
+                with col_sv:
+                    if services:
+                        st.markdown(f"""<div class="premium-card">
+                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🔧 Services</p>
+                            <p style="font-size:0.75rem; margin:0;">{' • '.join(services)}</p>
+                        </div>""", unsafe_allow_html=True)
+                with col_zn:
+                    if zones:
+                        st.markdown(f"""<div class="premium-card">
+                            <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">📍 Zones géographiques</p>
+                            <p style="font-size:0.75rem; margin:0;">{' • '.join(zones)}</p>
+                        </div>""", unsafe_allow_html=True)
+
+            # Bouton refresh
+            if st.button("🔄 Réactualiser l'analyse", key="refresh_intel"):
+                with st.spinner("Réactualisation..."):
+                    enrich_key = f"enrich_data_{syndic_siret}"
+                    if enrich_key not in st.session_state:
+                        cached_enrich = enricher.get_cached_data(syndic_siret)
+                        if cached_enrich:
+                            st.session_state[enrich_key] = cached_enrich
+                    domain = None
+                    enrich_data = st.session_state.get(enrich_key)
+                    if enrich_data:
+                        domain = enrich_data.get("domain")
+                    city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
+                    result = intel_engine.run_intelligence(
+                        siret=syndic_siret, name=syndic_name, city=city,
+                        domain=domain, pappers_data=pappers_info,
+                        nb_copros=int(syndic_row.get('nb_copros', 0)),
+                        total_lots=int(syndic_row.get('total_lots', 0)),
+                        force_refresh=True,
+                    )
+                    if result:
+                        st.session_state[intel_key] = result
+                        st.rerun()
+
+    with tab_contacts:
+        from core.enrichment_manager import EnrichmentManager as EM2
+
+        # Merge contacts: Apollo intel contacts + enrichment contacts
+        all_contacts = []
+
+        # Source 1: Apollo contacts from intelligence pipeline
+        intel_contacts_raw = (intel_data or {}).get("apollo_contacts_json", []) if intel_data else []
+        if isinstance(intel_contacts_raw, str):
+            try:
+                intel_contacts_raw = json.loads(intel_contacts_raw)
+            except Exception:
+                intel_contacts_raw = []
+        if intel_contacts_raw:
+            all_contacts.extend(intel_contacts_raw)
+
+        # Source 2: Enrichment manager contacts (Apollo targeted search)
+        enricher2 = EM2()
+        enrich_key = f"enrich_data_{syndic_siret}"
+        if enrich_key not in st.session_state:
+            cached = enricher2.get_cached_data(syndic_siret)
+            if cached:
+                st.session_state[enrich_key] = cached
+
+        data_enrich = st.session_state.get(enrich_key)
+        if data_enrich:
+            enrich_contacts = data_enrich.get('contacts_json', [])
+            if isinstance(enrich_contacts, str):
+                try:
+                    enrich_contacts = json.loads(enrich_contacts)
+                except Exception:
+                    enrich_contacts = []
+            # Deduplicate by email
+            existing_emails = {ct.get("email", "").lower() for ct in all_contacts if ct.get("email")}
+            for ec in enrich_contacts:
+                if ec.get("email", "").lower() not in existing_emails:
+                    all_contacts.append(ec)
+                    existing_emails.add(ec.get("email", "").lower())
+
+        if not all_contacts and not data_enrich:
+            if st.button("🚀 Rechercher les contacts", type="primary", use_container_width=True):
+                with st.spinner("Recherche de contacts (Apollo)..."):
+                    city = st.session_state['selected_syndic_data'].iloc[0]['commune'] if not st.session_state['selected_syndic_data'].empty else ""
+                    fresh = enricher2.enrich_syndic(syndic_siret, syndic_name, city, pappers_data=pappers_info)
+                    if fresh:
+                        st.session_state[enrich_key] = fresh
+                        st.rerun()
+        elif not all_contacts:
+            st.info("Aucun contact trouvé pour ce syndic.")
+        else:
+            st.caption(f"{len(all_contacts)} contact(s) trouvé(s)")
+            for idx, ct in enumerate(all_contacts[:10]):
+                with st.container(border=True):
+                    col_ct, col_act = st.columns([3, 1])
+                    col_ct.markdown(f"**{ct.get('first_name', '')} {ct.get('last_name', '')}** — {ct.get('title') or 'Lead'}")
+                    details = []
+                    email_ct = ct.get('email', '')
+                    if email_ct:
+                        details.append(f"📧 {email_ct}")
+                    phones = ct.get('phone_numbers', [])
+                    if phones:
+                        details.append(f"📞 {', '.join(phones) if isinstance(phones, list) else phones}")
+                    linkedin_ct = ct.get('linkedin_url', '')
+                    if linkedin_ct:
+                        details.append(f"[LinkedIn]({linkedin_ct})")
+                    if details:
+                        col_ct.caption(" • ".join(details))
+                    if col_act.button("🎯 Prospecter", key=f"sel_{idx}"):
+                        st.session_state['selected_contact'] = ct
+                        go_to_step(4)
 
     with tab_parc:
         st.dataframe(st.session_state['selected_syndic_data'], use_container_width=True, hide_index=True, height=300)
 
 # --- STEP 4: PROSPECTING PACK ---
 elif st.session_state['current_step'] == 4:
+    import json as json4
     col_back, col_new = st.columns([1, 4])
     with col_back:
         if st.button("⬅️ Contacts"): go_to_step(3)
@@ -459,21 +733,58 @@ elif st.session_state['current_step'] == 4:
         if st.button("🔄 Nouvelle recherche"):
             st.session_state['syndic_list'] = pd.DataFrame()
             go_to_step(1)
-        
-    contact, syndic_row = st.session_state.get('selected_contact', {}), st.session_state.get('selected_syndic_row', {})
-    
+
+    contact = st.session_state.get('selected_contact', {})
+    syndic_row = st.session_state.get('selected_syndic_row', {})
+    syndic_siret_pack = syndic_row.get('Siret', '')
+
+    # Try to get LLM-generated icebreaker from intel cache
+    intel_key_pack = f"intel_data_{syndic_siret_pack}"
+    intel_pack = st.session_state.get(intel_key_pack, {})
+    analysis_pack = intel_pack.get("llm_analysis_json", {})
+    if isinstance(analysis_pack, str):
+        try:
+            analysis_pack = json4.loads(analysis_pack)
+        except Exception:
+            analysis_pack = {}
+
+    llm_icebreaker = analysis_pack.get("email_icebreaker", "")
+    score_pack = analysis_pack.get("score_prospection", "?")
+    angle_pack = analysis_pack.get("angle_approche_recommande", "")
+
+    first_name = contact.get('first_name', 'Bonjour')
+    fallback_ice = f"Objet : {syndic_row.get('Syndic')}\n\nBonjour {first_name},\n\nJ'ai identifié {int(syndic_row.get('nb_copros', 0))} de vos immeubles à fort potentiel CEE..."
+    ice = llm_icebreaker if llm_icebreaker else fallback_ice
+
     c1, c2 = st.columns([2, 1])
     with c1:
         with st.container(border=True):
             st.markdown("#### ✉️ Email Icebreaker")
-            first_name = contact.get('first_name', 'Bonjour')
-            ice = f"Objet : {syndic_row.get('Syndic')}\n\nBonjour {first_name},\n\nJ'ai identifié {int(syndic_row.get('nb_copros', 0))} de vos immeubles à fort potentiel CEE..."
-            st.text_area("Template", value=ice, height=150, label_visibility="collapsed")
+            if llm_icebreaker:
+                st.caption("✨ Généré par IA — personnalisé à partir de l'analyse du syndic")
+            else:
+                st.caption("📝 Template standard — lancez l'Intelligence pour un email personnalisé")
+            st.text_area("Template", value=ice, height=180, label_visibility="collapsed")
             if st.button("📋 Copier le Pack"): st.toast("Copié !")
+
+        if angle_pack:
+            st.markdown(f"""<div class="premium-card" style="border-left: 3px solid {c['accent']};">
+                <p style="font-size:0.75rem; font-weight:600; margin:0 0 0.25rem 0;">🎯 Angle d'approche</p>
+                <p style="font-size:0.8rem; margin:0;">{angle_pack}</p>
+            </div>""", unsafe_allow_html=True)
 
     with c2:
         with st.container(border=True):
             st.markdown("#### 📦 Détails")
             st.caption(f"**{contact.get('first_name')} {contact.get('last_name')}**")
             st.caption(f"`{contact.get('email', 'N/A')}`")
+            linkedin = contact.get('linkedin_url', '')
+            if linkedin:
+                st.caption(f"[LinkedIn]({linkedin})")
             st.metric("Cibles", f"{int(syndic_row.get('nb_copros', 0))} bat.", delta=f"{int(syndic_row.get('total_lots', 0))} lots")
+            if isinstance(score_pack, (int, float)):
+                score_color_pack = "#10B981" if score_pack >= 7 else "#F59E0B" if score_pack >= 4 else "#EF4444"
+                st.markdown(f"""<div style="text-align:center; margin-top:0.5rem;">
+                    <p style="font-size:0.7rem; color:{c['sub_text']}; margin:0;">SCORE</p>
+                    <p style="font-size:1.5rem; font-weight:800; color:{score_color_pack}; margin:0;">{score_pack}/10</p>
+                </div>""", unsafe_allow_html=True)
