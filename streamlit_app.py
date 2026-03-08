@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
-from core.data_manager import fetch_aggregated_syndics, fetch_data_by_syndic, REGIONS_DEPARTMENTS
+from core.data_manager import fetch_aggregated_syndics, fetch_data_by_syndic, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES
 import base64
 
 # Page Configuration
@@ -284,6 +284,20 @@ if st.session_state['current_step'] == 1:
                 default=[],
                 placeholder="Toutes les régions..."
             )
+            if selected_regions:
+                available_depts = []
+                for r in selected_regions:
+                    available_depts.extend(REGIONS_DEPARTMENTS.get(r, []))
+            else:
+                available_depts = sorted(DEPARTMENTS_NAMES.keys())
+            dept_options = [DEPARTMENTS_NAMES[d] for d in available_depts if d in DEPARTMENTS_NAMES]
+            selected_dept_labels = st.multiselect(
+                "Départements",
+                options=dept_options,
+                default=[],
+                placeholder="Tous les départements..."
+            )
+            selected_departments = [lbl.split(" - ")[0] for lbl in selected_dept_labels]
             selected_periods = st.multiselect(
                 "Périodes de construction",
                 options=['Avant 1949', '1949-1974', '1975-1993', '1994-2000', '2001-2010', 'Après 2011'],
@@ -312,12 +326,14 @@ if st.session_state['current_step'] == 1:
                 periods=selected_periods,
                 exclude_big_syndics=exclude_big,
                 qpv_only=qpv_only,
-                regions=selected_regions
+                regions=selected_regions,
+                departments=selected_departments
             )
             # Store filters for reuse in step 2
             st.session_state['filters'] = {
                 'zones': selected_zones,
                 'regions': selected_regions,
+                'departments': selected_departments,
                 'lots': selected_lots,
                 'periods': selected_periods,
                 'exclude_big': exclude_big,
@@ -384,7 +400,7 @@ elif st.session_state['current_step'] == 3:
         st.session_state['selected_syndic_data'] = fetch_data_by_syndic(
             syndic_name, filters.get('zones', ['H1']), filters.get('lots', (0, 1000))[0], filters.get('lots', (0, 1000))[1],
             periods=filters.get('periods'), exclude_big_syndics=filters.get('exclude_big', True), qpv_only=filters.get('qpv', False),
-            regions=filters.get('regions')
+            regions=filters.get('regions'), departments=filters.get('departments')
         )
         st.session_state['current_syndic_name'] = syndic_name
         
