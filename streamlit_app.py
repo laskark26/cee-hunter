@@ -109,7 +109,7 @@ def synchronized_range_filter(label, key_prefix, min_val, max_val, default_val):
 
 # --- SESSION STATE MANAGEMENT ---
 if 'theme' not in st.session_state:
-    st.session_state['theme'] = 'Dark' # Initial fallback
+    st.session_state['theme'] = 'Light' # Initial fallback
 if 'theme_manually_set' not in st.session_state:
     st.session_state['theme_manually_set'] = False
 if 'current_step' not in st.session_state:
