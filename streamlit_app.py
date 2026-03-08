@@ -436,8 +436,8 @@ elif st.session_state["current_step"] == 3:
     with col_title:
         st.markdown(f"### {syndic_name}")
 
-    from core.pappers_connector import get_syndic_info
-    pappers_info = get_syndic_info(syndic_siret)
+    # Pappers API disabled for now
+    pappers_info = {}
 
     filters = st.session_state.get("filters", {})
     if st.session_state["current_syndic_name"] != syndic_name:
@@ -954,16 +954,8 @@ elif st.session_state["current_step"] == 3:
             _add_contacts(enrich_contacts)
 
         if not all_contacts and not data_enrich:
-            if st.button("🚀 Rechercher les contacts", type="primary", use_container_width=True):
-                with st.spinner("Recherche de contacts (Apollo)..."):
-                    city = (pappers_info or {}).get("ville_siege", "")
-                    if not city:
-                        raw_commune = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
-                        city = raw_commune if raw_commune and not raw_commune.isdigit() else ""
-                    fresh = enricher2.enrich_syndic(syndic_siret, syndic_name, city, pappers_data=pappers_info)
-                    if fresh:
-                        st.session_state[enrich_key] = fresh
-                        st.rerun()
+            # Apollo API disabled for now
+            render_empty_state("Aucun contact trouvé", "La recherche de contacts est temporairement désactivée.", "👤")
         elif not all_contacts:
             render_empty_state("Aucun contact trouvé", "Aucun contact n'a été identifié pour ce syndic.", "👤")
         else:
@@ -1076,10 +1068,13 @@ elif st.session_state["current_step"] == 3:
                             num_immat = str(row.get("numero_immatriculation_copropriete", ""))
                             copro_name = nom_copro or num_immat or f"Copro #{idx+1}"
                             address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
-                            lots = int(row.get(lots_col, 0))
-                            period = row.get("periode_de_construction", "")
+                            try:
+                                lots = int(float(row.get(lots_col, 0) or 0))
+                            except (ValueError, TypeError):
+                                lots = 0
+                            period = str(row.get("periode_de_construction", "") or "")
                             with col:
-                                render_copro_card(str(copro_name), address, lots, str(period), urbs_data=urbs_cache.get(idx), numero_immat=num_immat)
+                                render_copro_card(str(copro_name), address, lots, period, urbs_data=urbs_cache.get(idx), numero_immat=num_immat)
 
     # ──────────────────────────────────────────────────────────
     # TAB: Tout le parc
