@@ -153,34 +153,73 @@ def render_info_card(title: str, content: str, accent_border: bool = False, icon
 
 # ── Contact Card ──────────────────────────────────────────────
 
+SOURCE_BADGES = {
+    "site_web": ("Site web", "#2563eb"),
+    "apollo": ("Apollo", "#7c3aed"),
+    "llm_analysis": ("IA", "#059669"),
+    "google_maps": ("Maps", "#d97706"),
+}
+
+
 def render_contact_card_html(contact: dict, theme_name: str) -> str:
-    """Return HTML for a single contact card (no st.markdown call)."""
+    """Return HTML for a single contact card (no st.markdown call).
+    Supports both Apollo format (first_name/last_name) and unified format (nom)."""
     t = get_theme(theme_name)
-    first = contact.get("first_name", "")
-    last = contact.get("last_name", "")
-    initials = (first[:1] + last[:1]).upper() or "?"
-    name = f"{first} {last}".strip() or "Inconnu"
-    role = contact.get("title") or "Contact"
-    email = contact.get("email", "")
-    phones = contact.get("phone_numbers", [])
-    if isinstance(phones, str):
-        phones = [phones] if phones else []
-    linkedin = contact.get("linkedin_url", "")
+
+    nom = (contact.get("nom") or "").strip()
+    if not nom:
+        first = contact.get("first_name", "")
+        last = contact.get("last_name", "")
+        nom = f"{first} {last}".strip()
+    nom = nom or "Inconnu"
+
+    parts = nom.split()
+    initials = (parts[0][:1] + (parts[-1][:1] if len(parts) > 1 else "")).upper() or "?"
+
+    role = contact.get("poste") or contact.get("title") or "Contact"
+
+    email = (contact.get("email") or "").strip()
+    telephone = (contact.get("telephone") or "").strip()
+    if not telephone:
+        phones = contact.get("phone_numbers", [])
+        if isinstance(phones, list) and phones:
+            telephone = phones[0]
+        elif isinstance(phones, str):
+            telephone = phones
+    linkedin = (contact.get("linkedin") or contact.get("linkedin_url") or "").strip()
 
     channels = []
     if email:
         channels.append(f'<span class="cee-contact-channel">📧 {email}</span>')
-    if phones:
-        ph = phones[0] if isinstance(phones, list) else phones
-        channels.append(f'<span class="cee-contact-channel">📞 {ph}</span>')
+    if telephone:
+        channels.append(f'<span class="cee-contact-channel">📞 {telephone}</span>')
     if linkedin:
         channels.append(f'<a class="cee-contact-channel" href="{linkedin}" target="_blank" rel="noopener">🔗 LinkedIn</a>')
+
+    source = (contact.get("source") or "").strip()
+    badge_html = ""
+    if source:
+        label, color = SOURCE_BADGES.get(source, (source, "#6b7280"))
+        badge_html = (
+            f'<span style="display:inline-block;font-size:10px;font-weight:600;'
+            f'padding:2px 6px;border-radius:4px;background:{color}20;color:{color};'
+            f'margin-left:6px;vertical-align:middle;">{label}</span>'
+        )
+
+    confidence = (contact.get("confidence") or "").strip()
+    conf_dot = ""
+    if confidence == "high":
+        conf_dot = '<span style="color:#059669;margin-left:4px;" title="Confiance haute">●</span>'
+    elif confidence == "medium":
+        conf_dot = '<span style="color:#d97706;margin-left:4px;" title="Confiance moyenne">●</span>'
+    elif confidence == "low":
+        conf_dot = '<span style="color:#dc2626;margin-left:4px;" title="Confiance basse">●</span>'
 
     return (
         f'<div class="cee-contact-card">'
         f'<div class="cee-contact-avatar">{initials}</div>'
         f'<div class="cee-contact-info">'
-        f'<p class="cee-contact-name">{name}</p>'
+        f'<p class="cee-contact-name">{nom}{badge_html}{conf_dot}</p>'
         f'<p class="cee-contact-role">{role}</p>'
         f'<div class="cee-contact-channels">{"".join(channels)}</div>'
         f'</div>'

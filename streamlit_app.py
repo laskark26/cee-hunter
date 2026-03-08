@@ -409,8 +409,12 @@ elif st.session_state["current_step"] == 3:
     # ──────────────────────────────────────────────────────────
 
     with tab_intel:
-        from core.syndic_intel import SyndicIntelligence
+        from core.syndic_intel import SyndicIntelligence, init_enrichment_tables
         from core.enrichment_manager import EnrichmentManager
+
+        if "enrichment_tables_initialized" not in st.session_state:
+            init_enrichment_tables()
+            st.session_state["enrichment_tables_initialized"] = True
 
         intel_engine = SyndicIntelligence()
         enricher = EnrichmentManager()
@@ -815,8 +819,32 @@ elif st.session_state["current_step"] == 3:
         from core.enrichment_manager import EnrichmentManager as EM2
 
         all_contacts = []
+        seen_keys = set()
 
-        # Source 1: Apollo contacts from intelligence pipeline
+        def _dedup_key(c):
+            email = (c.get("email") or "").strip().lower()
+            if email:
+                return f"email:{email}"
+            nom = (c.get("nom") or "").strip().lower()
+            if not nom:
+                first = (c.get("first_name") or "")
+                last = (c.get("last_name") or "")
+                nom = f"{first} {last}".strip().lower()
+            return f"nom:{nom}" if nom else None
+
+        def _add_contacts(contacts_list):
+            for c in contacts_list:
+                key = _dedup_key(c)
+                if key and key not in seen_keys:
+                    seen_keys.add(key)
+                    all_contacts.append(c)
+
+        # Source 1: Persistent enrichment contacts (syndic_contacts table)
+        persistent_contacts = intel_engine.get_contacts(syndic_siret)
+        if persistent_contacts:
+            _add_contacts(persistent_contacts)
+
+        # Source 2: Apollo contacts from intelligence pipeline
         intel_contacts_raw = (intel_data or {}).get("apollo_contacts_json", []) if intel_data else []
         if isinstance(intel_contacts_raw, str):
             try:
@@ -824,9 +852,9 @@ elif st.session_state["current_step"] == 3:
             except Exception:
                 intel_contacts_raw = []
         if intel_contacts_raw:
-            all_contacts.extend(intel_contacts_raw)
+            _add_contacts(intel_contacts_raw)
 
-        # Source 2: Enrichment manager contacts
+        # Source 3: Enrichment manager contacts (legacy)
         enricher2 = EM2()
         enrich_key = f"enrich_data_{syndic_siret}"
         if enrich_key not in st.session_state:
@@ -842,11 +870,7 @@ elif st.session_state["current_step"] == 3:
                     enrich_contacts = json.loads(enrich_contacts)
                 except Exception:
                     enrich_contacts = []
-            existing_emails = {ct.get("email", "").lower() for ct in all_contacts if ct.get("email")}
-            for ec in enrich_contacts:
-                if ec.get("email", "").lower() not in existing_emails:
-                    all_contacts.append(ec)
-                    existing_emails.add(ec.get("email", "").lower())
+            _add_contacts(enrich_contacts)
 
         if not all_contacts and not data_enrich:
             if st.button("🚀 Rechercher les contacts", type="primary", use_container_width=True):
@@ -861,13 +885,12 @@ elif st.session_state["current_step"] == 3:
         else:
             st.markdown(f'<p style="font-size:13px;color:{t["text_secondary"]};margin-bottom:12px;">{len(all_contacts)} contact(s) trouvé(s)</p>', unsafe_allow_html=True)
 
-            # Bulk select
             if "selected_contacts" not in st.session_state:
                 st.session_state["selected_contacts"] = set()
 
             select_all = st.checkbox("Tout sélectionner", key="select_all_contacts")
 
-            for idx, ct in enumerate(all_contacts[:15]):
+            for idx, ct in enumerate(all_contacts[:20]):
                 col_check, col_card, col_action = st.columns([0.5, 4, 1])
                 with col_check:
                     checked = st.checkbox("", key=f"ct_check_{idx}", value=select_all, label_visibility="collapsed")

@@ -2,6 +2,7 @@
 import os
 import json
 import re
+import uuid
 import requests
 import streamlit as st
 from urllib.parse import urlparse
@@ -13,7 +14,9 @@ from rapidfuzz import fuzz
 
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_syndic_intel"
-ANALYSIS_VERSION = 6
+ENRICHMENT_TABLE = "gen-lang-client-0045947309.rnic.syndic_enrichment"
+CONTACTS_TABLE = "gen-lang-client-0045947309.rnic.syndic_contacts"
+ANALYSIS_VERSION = 7
 DEFAULT_TTL_DAYS = 30
 
 # ── SerpApi Configuration ─────────────────────────────────
@@ -174,6 +177,41 @@ def init_intel_cache():
         print(f"Error creating/migrating intel cache: {e}")
 
 
+def init_enrichment_tables():
+    client = get_bigquery_client()
+    try:
+        client.query(f"""
+            CREATE TABLE IF NOT EXISTS `{ENRICHMENT_TABLE}` (
+                siret STRING,
+                syndic_name STRING,
+                identified_domain STRING,
+                domain_source STRING,
+                google_maps_json STRING,
+                social_links_json STRING,
+                llm_analysis_json STRING,
+                enriched_at TIMESTAMP,
+                enrichment_version INT64
+            )
+        """).result()
+
+        client.query(f"""
+            CREATE TABLE IF NOT EXISTS `{CONTACTS_TABLE}` (
+                id STRING,
+                siret STRING,
+                nom STRING,
+                poste STRING,
+                email STRING,
+                telephone STRING,
+                linkedin STRING,
+                source STRING,
+                confidence STRING,
+                extracted_at TIMESTAMP
+            )
+        """).result()
+    except Exception as e:
+        print(f"Error creating enrichment tables: {e}")
+
+
 class SyndicIntelligence:
     MAX_PAGES = 8
     MAX_CHARS_PER_PAGE = 8000
@@ -236,6 +274,129 @@ class SyndicIntelligence:
             self.bq_client.insert_rows_json(CACHE_TABLE, [row])
         except Exception as e:
             print(f"Intel cache save error: {e}")
+
+    # ── Enrichment persistence ───────────────────────────────
+
+    def save_enrichment(self, siret, data):
+        try:
+            self.bq_client.query(
+                f"DELETE FROM `{ENRICHMENT_TABLE}` WHERE siret = '{siret}'"
+            ).result()
+
+            row = {
+                "siret": siret,
+                "syndic_name": data.get("syndic_name", ""),
+                "identified_domain": data.get("identified_domain", ""),
+                "domain_source": data.get("domain_source", ""),
+                "google_maps_json": json.dumps(data.get("google_maps_json") or {}, ensure_ascii=False)
+                    if isinstance(data.get("google_maps_json"), (dict, list)) else (data.get("google_maps_json") or ""),
+                "social_links_json": json.dumps(data.get("social_links_json") or {}, ensure_ascii=False)
+                    if isinstance(data.get("social_links_json"), (dict, list)) else (data.get("social_links_json") or ""),
+                "llm_analysis_json": json.dumps(data.get("llm_analysis_json") or {}, ensure_ascii=False)
+                    if isinstance(data.get("llm_analysis_json"), (dict, list)) else (data.get("llm_analysis_json") or ""),
+                "enriched_at": datetime.now().isoformat(),
+                "enrichment_version": ANALYSIS_VERSION,
+            }
+            self.bq_client.insert_rows_json(ENRICHMENT_TABLE, [row])
+        except Exception as e:
+            print(f"Enrichment save error: {e}")
+
+    def get_enrichment(self, siret):
+        try:
+            query = f"SELECT * FROM `{ENRICHMENT_TABLE}` WHERE siret = '{siret}' LIMIT 1"
+            df = self.bq_client.query(query).to_dataframe()
+            if df.empty:
+                return None
+            row = df.iloc[0].to_dict()
+            for field in ("google_maps_json", "social_links_json", "llm_analysis_json"):
+                val = row.get(field)
+                if isinstance(val, str):
+                    try:
+                        row[field] = json.loads(val)
+                    except Exception:
+                        pass
+            return row
+        except Exception as e:
+            print(f"Enrichment lookup error: {e}")
+            return None
+
+    def save_contacts(self, siret, contacts, source="site_web"):
+        if not contacts:
+            return
+        try:
+            existing_df = self.bq_client.query(
+                f"SELECT email, nom FROM `{CONTACTS_TABLE}` WHERE siret = '{siret}'"
+            ).to_dataframe()
+            existing_emails = set(existing_df["email"].dropna().str.lower().tolist()) if not existing_df.empty else set()
+            existing_noms = set(existing_df["nom"].dropna().str.lower().tolist()) if not existing_df.empty else set()
+
+            rows_to_insert = []
+            for c in contacts:
+                nom = c.get("nom", "").strip()
+                if not nom:
+                    first = c.get("first_name", "")
+                    last = c.get("last_name", "")
+                    nom = f"{first} {last}".strip()
+                if not nom:
+                    continue
+
+                email = (c.get("email") or "").strip().lower()
+                if email and email in existing_emails:
+                    continue
+                if not email and nom.lower() in existing_noms:
+                    continue
+
+                telephone = c.get("telephone", "") or ""
+                if not telephone:
+                    phones = c.get("phone_numbers", [])
+                    if isinstance(phones, list) and phones:
+                        telephone = phones[0]
+                    elif isinstance(phones, str):
+                        telephone = phones
+
+                poste = c.get("poste", "") or c.get("title", "") or ""
+                linkedin = c.get("linkedin", "") or c.get("linkedin_url", "") or ""
+                contact_source = c.get("source", source)
+
+                confidence = "medium"
+                if email and telephone:
+                    confidence = "high"
+                elif not email and not telephone:
+                    confidence = "low"
+
+                rows_to_insert.append({
+                    "id": str(uuid.uuid4()),
+                    "siret": siret,
+                    "nom": nom,
+                    "poste": poste,
+                    "email": email,
+                    "telephone": telephone,
+                    "linkedin": linkedin,
+                    "source": contact_source,
+                    "confidence": confidence,
+                    "extracted_at": datetime.now().isoformat(),
+                })
+
+                if email:
+                    existing_emails.add(email)
+                existing_noms.add(nom.lower())
+
+            if rows_to_insert:
+                self.bq_client.insert_rows_json(CONTACTS_TABLE, rows_to_insert)
+                print(f"Saved {len(rows_to_insert)} contacts to {CONTACTS_TABLE}")
+        except Exception as e:
+            print(f"Contacts save error: {e}")
+
+    def get_contacts(self, siret):
+        try:
+            query = f"SELECT * FROM `{CONTACTS_TABLE}` WHERE siret = '{siret}' ORDER BY extracted_at DESC"
+            df = self.bq_client.query(query).to_dataframe()
+            if df.empty:
+                return []
+            return df.to_dict("records")
+        except Exception as e:
+            print(f"Contacts lookup error: {e}")
+            return []
 
     # ── SerpApi: Google SERP Search ─────────────────────────
 
@@ -1017,4 +1178,33 @@ class SyndicIntelligence:
         }
 
         self.save_to_cache(result)
+
+        # ── Persist to enrichment tables ─────────────────────
+        try:
+            self.save_enrichment(siret, result)
+
+            all_contacts_to_save = []
+
+            for sc in (scraped_contacts or []):
+                all_contacts_to_save.append({**sc, "source": sc.get("source", "site_web")})
+
+            for ac in (apollo_contacts or []):
+                all_contacts_to_save.append({**ac, "source": "apollo"})
+
+            llm_contacts_cles = []
+            if isinstance(llm_analysis, dict):
+                llm_contacts_cles = llm_analysis.get("contacts_cles", [])
+            elif isinstance(llm_analysis, str):
+                try:
+                    llm_contacts_cles = json.loads(llm_analysis).get("contacts_cles", [])
+                except Exception:
+                    pass
+            for lc in llm_contacts_cles:
+                if isinstance(lc, dict) and (lc.get("nom") or lc.get("email")):
+                    all_contacts_to_save.append({**lc, "source": lc.get("source", "llm_analysis")})
+
+            self.save_contacts(siret, all_contacts_to_save)
+        except Exception as e:
+            print(f"Enrichment persistence error: {e}")
+
         return result
