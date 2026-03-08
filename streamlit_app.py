@@ -532,7 +532,10 @@ elif st.session_state["current_step"] == 3:
                             if candidate and not any(bl in candidate.lower() for bl in URL_BLACKLIST):
                                 domain = candidate
 
-                    city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                    city = (pappers_info or {}).get("ville_siege", "")
+                    if not city:
+                        raw_commune = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                        city = raw_commune if raw_commune and not raw_commune.isdigit() else ""
                     result = intel_engine.run_intelligence(
                         siret=syndic_siret, name=syndic_name, city=city, domain=domain,
                         pappers_data=pappers_info,
@@ -855,7 +858,10 @@ elif st.session_state["current_step"] == 3:
                     enrich_data_r = st.session_state.get(enrich_key)
                     if enrich_data_r:
                         domain = enrich_data_r.get("domain")
-                    city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                    city = (pappers_info or {}).get("ville_siege", "")
+                    if not city:
+                        raw_commune = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                        city = raw_commune if raw_commune and not raw_commune.isdigit() else ""
                     result = intel_engine.run_intelligence(
                         siret=syndic_siret, name=syndic_name, city=city,
                         domain=domain, pappers_data=pappers_info,
@@ -932,7 +938,10 @@ elif st.session_state["current_step"] == 3:
         if not all_contacts and not data_enrich:
             if st.button("🚀 Rechercher les contacts", type="primary", use_container_width=True):
                 with st.spinner("Recherche de contacts (Apollo)..."):
-                    city = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                    city = (pappers_info or {}).get("ville_siege", "")
+                    if not city:
+                        raw_commune = st.session_state["selected_syndic_data"].iloc[0]["commune"] if not st.session_state["selected_syndic_data"].empty else ""
+                        city = raw_commune if raw_commune and not raw_commune.isdigit() else ""
                     fresh = enricher2.enrich_syndic(syndic_siret, syndic_name, city, pappers_data=pappers_info)
                     if fresh:
                         st.session_state[enrich_key] = fresh

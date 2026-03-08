@@ -840,12 +840,16 @@ class SyndicIntelligence:
         best_score = 0
         best_source = "unknown"
 
+        from collections import Counter
+        domain_freq = Counter(d for _, d in candidates if _ == "serp")
+
         for source, domain in candidates:
             domain_name = domain.split('.')[0]
             domain_clean = re.sub(r'[^a-zA-Z0-9]', '', domain_name.lower())
             score = fuzz.partial_ratio(clean_name, domain_clean)
             source_bonus = {"pappers": 15, "google_maps": 12, "pappers_email": 8, "serp": 0}.get(source, 0)
-            total = score + source_bonus
+            freq_bonus = min((domain_freq.get(domain, 0) - 1) * 10, 20)
+            total = score + source_bonus + freq_bonus
             if total > best_score:
                 best_score = total
                 best_domain = domain
@@ -863,8 +867,7 @@ class SyndicIntelligence:
         # Fallback: take the most common SERP domain
         serp_domains = [d for s, d in candidates if s == "serp"]
         if serp_domains:
-            from collections import Counter
-            most_common = Counter(serp_domains).most_common(1)[0]
+            most_common = domain_freq.most_common(1)[0]
             if most_common[1] >= 2:
                 print(f"DEBUG: Domain fallback to most common SERP domain: {most_common[0]} (appeared {most_common[1]}x)")
                 return most_common[0], "serp_fallback"

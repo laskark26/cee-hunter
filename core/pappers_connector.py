@@ -126,7 +126,8 @@ def get_syndic_info(siret):
                 "telephone": data.get("telephone", "") or data.get("siege", {}).get("telephone", ""),
                 "email": data.get("email", "") or data.get("siege", {}).get("email", ""),
                 "lien_linkedin": data.get("lien_linkedin", ""),
-                "categorie_entreprise": data.get("categorie_entreprise", "")
+                "categorie_entreprise": data.get("categorie_entreprise", ""),
+                "ville_siege": data.get("siege", {}).get("ville", "")
             }
             
             # Extract Leader
