@@ -1064,8 +1064,10 @@ elif st.session_state["current_step"] == 3:
                         if i + j < len(filtered_indices):
                             idx = filtered_indices[i + j]
                             row = df_parc.iloc[idx]
-                            nom_copro = str(row.get("nom_copropriete", "") or "")
-                            num_immat = str(row.get("numero_immatriculation_copropriete", ""))
+                            _raw_nom = row.get("nom_copropriete", "")
+                            nom_copro = str(_raw_nom).strip() if pd.notna(_raw_nom) and _raw_nom else ""
+                            _raw_immat = row.get("numero_immatriculation_copropriete", "")
+                            num_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and _raw_immat else ""
                             copro_name = nom_copro or num_immat or f"Copro #{idx+1}"
                             address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
                             try:
