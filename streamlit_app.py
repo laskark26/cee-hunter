@@ -1283,20 +1283,30 @@ elif st.session_state["current_step"] == 3:
             lots_col = "nombre_de_lots_a_usage_d_habitation"
 
             # Pre-enrich all copros and collect distinct URBS values
+            SEUIL_URBS = 15
+            enrich_key = f"urbs_enrichi_{syndic_siret}"
             urbs_cache = {}
             chauffage_values = set()
             energie_values = set()
-            for idx in range(len(df_parc)):
-                row = df_parc.iloc[idx]
-                address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
-                numero_immat = str(row.get("numero_immatriculation_copropriete", ""))
-                data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
-                urbs_cache[idx] = data
-                if data:
-                    if data.get("chauffage"):
-                        chauffage_values.add(data["chauffage"])
-                    if data.get("energie"):
-                        energie_values.add(data["energie"])
+
+            if len(df_parc) <= SEUIL_URBS or st.session_state.get(enrich_key):
+                for idx in range(len(df_parc)):
+                    row = df_parc.iloc[idx]
+                    address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
+                    numero_immat = str(row.get("numero_immatriculation_copropriete", ""))
+                    data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
+                    urbs_cache[idx] = data
+                    if data:
+                        if data.get("chauffage"):
+                            chauffage_values.add(data["chauffage"])
+                        # Waterfall : chauffage individuel → pas d'énergie collective
+                        if data.get("energie") and "individuel" not in data.get("chauffage", "").lower():
+                            energie_values.add(data["energie"])
+            else:
+                st.info(f"ℹ️ {len(df_parc)} immeubles — enrichissement URBS non lancé automatiquement.")
+                if st.button(f"🔬 Enrichir les {len(df_parc)} immeubles", key="btn_urbs_enrich"):
+                    st.session_state[enrich_key] = True
+                    st.rerun()
 
             # Stats summary
             nb_copros = len(df_parc)

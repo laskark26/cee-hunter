@@ -281,7 +281,7 @@ def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data
         if chauffage:
             badges.append(f'<span class="cee-copro-badge">🔥 {chauffage}</span>')
         energie = urbs_data.get("energie", "")
-        if energie:
+        if energie and "individuel" not in chauffage.lower():
             badges.append(f'<span class="cee-copro-badge">⚡ {energie}</span>')
         annee = urbs_data.get("annee")
         if annee:
