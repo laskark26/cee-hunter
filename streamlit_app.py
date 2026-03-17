@@ -35,6 +35,8 @@ st.set_page_config(
 
 def check_password():
     def password_entered():
+        if "password" not in st.session_state:
+            return
         if st.session_state["password"] == st.secrets.get("APP_PASSWORD", "antigravity2026"):
             st.session_state["password_correct"] = True
             del st.session_state["password"]
