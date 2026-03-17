@@ -1,10 +1,17 @@
 import streamlit as st
 import pandas as pd
 import json
+import plotly.express as px
+import plotly.graph_objects as go
+
+from core.log_config import setup_logging
+setup_logging()
+
 from core.data_manager import (
     fetch_aggregated_syndics, fetch_data_by_syndic, fetch_all_data_by_syndic,
-    count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES,
+    count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES, DEPT_TO_REGION,
     init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
+    fetch_stats_par_departement, aggregate_stats_par_region, fetch_syndics_par_territoire,
 )
 from core.urbs_connector import urbs_enrich_address, init_urbs_table
 from styles import generate_css, get_theme, score_color, PALETTE
@@ -56,6 +63,11 @@ defaults = {
     "syndic_list": pd.DataFrame(),
     "selected_syndic_data": pd.DataFrame(),
     "current_syndic_name": None,
+    # Vue Nationale
+    "vue_mode": "prospection",
+    "carte_niveau": "region",
+    "carte_region_selected": None,
+    "carte_df_dept": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -94,10 +106,23 @@ t = get_theme(THEME)
 
 st.markdown(generate_css(THEME), unsafe_allow_html=True)
 
-# ── Header + Stepper ──────────────────────────────────────────
+# ── Header + Navigation ───────────────────────────────────────
 
 render_header(THEME)
-render_stepper(st.session_state["current_step"])
+
+_nav_col, _spacer = st.columns([2, 6])
+with _nav_col:
+    _is_carte = st.session_state["vue_mode"] == "carte_nationale"
+    if st.button(
+        "⚡ Prospection" if _is_carte else "🗺️ Vue Nationale",
+        key="btn_mode_toggle",
+        use_container_width=True,
+    ):
+        st.session_state["vue_mode"] = "prospection" if _is_carte else "carte_nationale"
+        st.rerun()
+
+if st.session_state["vue_mode"] == "prospection":
+    render_stepper(st.session_state["current_step"])
 
 # ── Synchronized Range Filter (utility) ───────────────────────
 
@@ -136,10 +161,263 @@ def synchronized_range_filter(label, key_prefix, min_val, max_val, default_val):
 
 
 # ══════════════════════════════════════════════════════════════
+# VUE NATIONALE — Carte Choroplèthe
+# ══════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=86400)
+def _load_geojson_regions():
+    import requests as _req
+    url = "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/regions-version-simplifiee.geojson"
+    return _req.get(url, timeout=15).json()
+
+
+@st.cache_data(ttl=86400)
+def _load_geojson_departements():
+    import requests as _req
+    url = "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements-version-simplifiee.geojson"
+    return _req.get(url, timeout=15).json()
+
+
+def _build_choropleth(df, geojson, locations_col, featureidkey, theme_name):
+    """Construit un Plotly choroplèthe coloré par nb_immeubles."""
+    t_local = get_theme(theme_name)
+    bg = t_local["bg"]
+    txt = t_local["text"]
+
+    fig = px.choropleth(
+        df,
+        geojson=geojson,
+        locations=locations_col,
+        featureidkey=featureidkey,
+        color="nb_immeubles",
+        color_continuous_scale="Greens",
+        hover_name=locations_col,
+        hover_data={"nb_immeubles": ":,"},
+        labels={"nb_immeubles": "Immeubles"},
+    )
+    fig.update_geos(
+        fitbounds="locations",
+        visible=False,
+        projection_type="mercator",
+        bgcolor=bg,
+    )
+    fig.update_layout(
+        margin={"r": 0, "t": 0, "l": 0, "b": 0},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color=txt,
+        coloraxis_colorbar=dict(title="Immeubles", thickness=12, len=0.6),
+        height=480,
+        clickmode="event+select",
+    )
+    return fig
+
+
+def _prefill_step1_from_carte(region, dept_codes, carte_filters):
+    """Pré-remplit les filtres Step 1 depuis la Vue Nationale et bascule en prospection."""
+    if dept_codes:
+        st.session_state["preset_departments"] = dept_codes
+        st.session_state["preset_regions"] = []
+    else:
+        st.session_state["preset_departments"] = []
+        st.session_state["preset_regions"] = [region] if region else []
+
+    zones = carte_filters.get("zones", [])
+    st.session_state["preset_zones"] = zones if zones else ["H1", "H2", "H3"]
+    st.session_state["preset_periods"] = carte_filters.get("periods", [])
+    lots = carte_filters.get("lots", (0, 10000))
+    st.session_state["preset_lots"] = tuple(lots)
+    if carte_filters.get("qpv_only"):
+        st.session_state["preset_qpv"] = True
+
+    st.session_state["vue_mode"] = "prospection"
+    st.session_state["current_step"] = 1
+    st.rerun()
+
+
+def render_vue_nationale(theme_name, t):
+    col_filters, col_carte = st.columns([1, 3])
+
+    # ── Panneau filtres ────────────────────────────────────────
+    with col_filters:
+        with st.container(border=True):
+            render_section_label("🔍 Filtres")
+
+            carte_zones = st.multiselect(
+                "Zones climatiques",
+                options=["H1", "H2", "H3"],
+                default=[],
+                placeholder="Toutes les zones...",
+                key="carte_zones",
+            )
+            carte_periods = st.multiselect(
+                "Périodes de construction",
+                options=["Avant 1949", "1949-1974", "1975-1993", "1994-2000", "2001-2010", "Après 2011"],
+                default=[],
+                placeholder="Toutes périodes...",
+                key="carte_periods",
+            )
+            carte_lots = st.slider(
+                "Plage de lots",
+                min_value=0, max_value=2000,
+                value=(0, 2000),
+                key="carte_lots_slider",
+            )
+            carte_qpv = st.checkbox("QPV uniquement", key="carte_qpv")
+            carte_excl = st.checkbox("Exclure grands syndics", key="carte_excl")
+
+            if st.button("Actualiser la carte", use_container_width=True, type="primary", key="btn_carte_refresh"):
+                st.session_state["carte_df_dept"] = None
+                st.rerun()
+
+    # ── Carte + liste syndics ──────────────────────────────────
+    with col_carte:
+        # Construire les filtres
+        carte_filters = {
+            "zones": carte_zones,
+            "periods": carte_periods,
+            "lots": carte_lots,
+            "qpv_only": carte_qpv,
+            "exclude_big_syndics": carte_excl,
+        }
+
+        # Chargement BQ (une seule fois, invalidé par "Actualiser")
+        if st.session_state["carte_df_dept"] is None:
+            with st.spinner("Chargement des données nationales..."):
+                st.session_state["carte_df_dept"] = fetch_stats_par_departement(carte_filters)
+
+        df_dept = st.session_state["carte_df_dept"]
+        niveau = st.session_state["carte_niveau"]
+        region_sel = st.session_state["carte_region_selected"]
+
+        # Breadcrumb + navigation
+        if niveau == "departement" and region_sel:
+            bc1, bc2 = st.columns([3, 1])
+            with bc1:
+                st.markdown(f"**France** › **{region_sel}** — Départements")
+            with bc2:
+                if st.button("← Régions", key="btn_back_regions"):
+                    st.session_state["carte_niveau"] = "region"
+                    st.session_state["carte_region_selected"] = None
+                    st.rerun()
+        else:
+            st.markdown("**France** — Vue régionale")
+
+        # ── Carte Plotly ──────────────────────────────────────
+        try:
+            if niveau == "region" or not region_sel:
+                geojson_r = _load_geojson_regions()
+                df_region = aggregate_stats_par_region(df_dept)
+                fig = _build_choropleth(df_region, geojson_r, "region_name", "properties.nom", theme_name)
+
+                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="carte_region_chart")
+
+                # Drill-down sur clic
+                if event and event.selection and event.selection.get("points"):
+                    clicked = event.selection["points"][0].get("location")
+                    if clicked:
+                        st.session_state["carte_region_selected"] = clicked
+                        st.session_state["carte_niveau"] = "departement"
+                        st.rerun()
+
+            else:  # niveau == "departement"
+                geojson_d = _load_geojson_departements()
+                df_dept_region = df_dept[df_dept["region_name"] == region_sel].copy()
+                fig = _build_choropleth(df_dept_region, geojson_d, "dept_code", "properties.code", theme_name)
+
+                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="carte_dept_chart")
+
+        except Exception as e:
+            st.warning(f"Impossible de charger la carte : {e}")
+
+        render_divider()
+
+        # ── Liste des syndics du territoire ───────────────────
+        if niveau == "departement" and region_sel:
+            depts_region = [row["dept_code"] for _, row in df_dept[df_dept["region_name"] == region_sel].iterrows()]
+            titre_territoire = region_sel
+        elif niveau == "region":
+            depts_region = None
+            titre_territoire = "France entière"
+        else:
+            depts_region = None
+            titre_territoire = "France entière"
+
+        render_section_label(f"🏢 Syndics — {titre_territoire}")
+
+        with st.spinner("Chargement des syndics..."):
+            df_syndics = fetch_syndics_par_territoire(
+                filters=carte_filters,
+                departments=depts_region,
+            )
+
+        if df_syndics.empty:
+            render_empty_state("Aucun syndic", "Modifiez les filtres et actualisez.", "🔍")
+        else:
+            kc1, kc2, kc3 = st.columns(3)
+            with kc1:
+                render_kpi_card("Syndics", f"{len(df_syndics):,}".replace(",", " "), primary=True)
+            with kc2:
+                render_kpi_card("Immeubles", f"{int(df_syndics['nb_copros'].sum()):,}".replace(",", " "))
+            with kc3:
+                render_kpi_card("Lots", f"{int(df_syndics['total_lots'].sum()):,}".replace(",", " "))
+
+            st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+
+            df_s_display = df_syndics[["Syndic", "Siret", "nb_copros", "total_lots"]].rename(
+                columns={"nb_copros": "Immeubles", "total_lots": "Lots"}
+            )
+            s_event = st.dataframe(
+                df_s_display,
+                use_container_width=True,
+                column_config={
+                    "Syndic": st.column_config.TextColumn("Nom du Syndic", width="large"),
+                    "Siret": st.column_config.TextColumn("SIRET", width="small"),
+                    "Immeubles": st.column_config.NumberColumn("Immeubles", format="%d"),
+                    "Lots": st.column_config.ProgressColumn(
+                        "Lots", format="%d", min_value=0,
+                        max_value=int(df_syndics["total_lots"].max()) if not df_syndics.empty else 100,
+                    ),
+                },
+                selection_mode="single-row",
+                on_select="rerun",
+                hide_index=True,
+                height=350,
+                key="carte_syndics_table",
+            )
+
+            # Clic sur un syndic → aller à sa fiche (Step 3)
+            if s_event and len(s_event.selection["rows"]) > 0:
+                selected_idx = s_event.selection["rows"][0]
+                selected_row = df_syndics.iloc[selected_idx]
+                st.session_state["selected_syndic_row"] = selected_row
+                st.session_state["vue_mode"] = "prospection"
+                # Conserver les filtres de la carte pour Step 3
+                st.session_state["filters"] = {
+                    "zones": carte_zones,
+                    "regions": [region_sel] if region_sel else [],
+                    "departments": depts_region or [],
+                    "lots": list(carte_lots),
+                    "periods": carte_periods,
+                    "exclude_big": carte_excl,
+                    "qpv": carte_qpv,
+                }
+                go_to_step(3)
+
+            # Bouton prospecter
+            render_divider()
+            if st.button("⚡ Prospecter ce territoire", type="primary", use_container_width=True, key="btn_prospecter_territoire"):
+                _prefill_step1_from_carte(region_sel, depts_region, carte_filters)
+
+
+# ══════════════════════════════════════════════════════════════
 # STEP 1 — CRITÈRES
 # ══════════════════════════════════════════════════════════════
 
-if st.session_state["current_step"] == 1:
+if st.session_state["vue_mode"] == "carte_nationale":
+    render_vue_nationale(THEME, t)
+
+elif st.session_state["current_step"] == 1:
 
     # ── Presets ───────────────────────────────────────────────
     render_section_label("Recherche rapide")

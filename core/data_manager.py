@@ -1,11 +1,15 @@
-import pandas as pd
-from google.cloud import bigquery
-import streamlit as st
+import logging
 import os
+
+import pandas as pd
+import streamlit as st
+from google.cloud import bigquery
 
 # Configuration
 PROJECT_ID = "gen-lang-client-0045947309"
 DATASET_TABLE = "gen-lang-client-0045947309.rnic.copro"
+
+logger = logging.getLogger(__name__)
 
 # Climate Zones Mapping
 H1_DEPARTMENTS = [
@@ -63,6 +67,13 @@ REGIONS_DEPARTMENTS = {
     "Occitanie": ["09", "11", "12", "30", "31", "32", "34", "46", "48", "65", "66", "81", "82"],
     "Pays de la Loire": ["44", "49", "53", "72", "85"],
     "Provence-Alpes-Côte d'Azur": ["04", "05", "06", "13", "83", "84"],
+}
+
+# Reverse mapping: département -> région
+DEPT_TO_REGION = {
+    dept: region
+    for region, depts in REGIONS_DEPARTMENTS.items()
+    for dept in depts
 }
 
 def get_climate_zone(code_dept):
@@ -189,6 +200,7 @@ def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, ex
         df = client.query(query).to_dataframe()
         return df
     except Exception as e:
+        logger.exception("Error fetching aggregations")
         st.error(f"Error fetching aggregations: {e}")
         return pd.DataFrame()
 
@@ -231,6 +243,7 @@ def fetch_data_by_syndic(syndic_name, climate_zones, min_lots, max_lots, periods
             
         return df
     except Exception as e:
+        logger.exception("Error fetching details for syndic")
         st.error(f"Error fetching details for syndic: {e}")
         return pd.DataFrame()
 
@@ -251,6 +264,7 @@ def count_matching_syndics(climate_zones, min_lots, max_lots, periods=None, excl
         df = client.query(query).to_dataframe()
         return int(df.iloc[0]["cnt"]) if not df.empty else 0
     except Exception:
+        logger.exception("Error counting matching syndics")
         return -1
 
 
@@ -275,7 +289,120 @@ def fetch_all_data_by_syndic(syndic_name):
             df = df.dropna(subset=['lat', 'long'])
         return df
     except Exception as e:
+        logger.exception("Error fetching full portfolio")
         st.error(f"Error fetching full portfolio: {e}")
+        return pd.DataFrame()
+
+
+def fetch_stats_par_departement(filters=None):
+    """
+    Vue Nationale : agrège nb_immeubles par département avec filtres optionnels.
+    filters dict : zones, periods, lots=(0,10000), qpv_only, exclude_big_syndics
+    Retourne un DataFrame avec colonnes : dept_code, nb_immeubles, region_name
+    """
+    if filters is None:
+        filters = {}
+
+    zones = filters.get("zones", [])
+    periods = filters.get("periods", [])
+    lots = filters.get("lots", (0, 10000))
+    qpv_only = filters.get("qpv_only", False)
+    exclude_big = filters.get("exclude_big_syndics", False)
+
+    where_clause, _ = build_filter_clause(
+        climate_zones=zones,
+        min_lots=lots[0],
+        max_lots=lots[1],
+        periods=periods,
+        exclude_big_syndics=exclude_big,
+        qpv_only=qpv_only,
+    )
+
+    query = f"""
+        SELECT
+            code_officiel_departement AS dept_code,
+            COUNT(*) AS nb_immeubles
+        FROM `{DATASET_TABLE}`
+        WHERE
+            code_officiel_departement IS NOT NULL
+            AND {where_clause}
+        GROUP BY 1
+        ORDER BY 1
+    """
+
+    client = get_bigquery_client()
+    try:
+        df = client.query(query).to_dataframe()
+        df["region_name"] = df["dept_code"].map(DEPT_TO_REGION).fillna("Autres")
+        return df
+    except Exception as e:
+        logger.exception("Erreur fetch_stats_par_departement")
+        st.error(f"Erreur chargement carte : {e}")
+        return pd.DataFrame(columns=["dept_code", "nb_immeubles", "region_name"])
+
+
+def aggregate_stats_par_region(df_dept):
+    """
+    Agrège un DataFrame département → région.
+    Entrée : sortie de fetch_stats_par_departement()
+    Sortie : DataFrame avec region_name, nb_immeubles
+    """
+    if df_dept.empty:
+        return pd.DataFrame(columns=["region_name", "nb_immeubles"])
+    return (
+        df_dept.groupby("region_name", as_index=False)["nb_immeubles"]
+        .sum()
+        .sort_values("nb_immeubles", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def fetch_syndics_par_territoire(filters=None, departments=None, regions=None):
+    """
+    Vue Nationale : retourne la liste des syndics d'un territoire (région ou depts),
+    avec le même format que fetch_aggregated_syndics().
+    """
+    if filters is None:
+        filters = {}
+
+    zones = filters.get("zones", [])
+    periods = filters.get("periods", [])
+    lots = filters.get("lots", (0, 10000))
+    qpv_only = filters.get("qpv_only", False)
+    exclude_big = filters.get("exclude_big_syndics", False)
+
+    where_clause, _ = build_filter_clause(
+        climate_zones=zones,
+        min_lots=lots[0],
+        max_lots=lots[1],
+        periods=periods,
+        exclude_big_syndics=exclude_big,
+        qpv_only=qpv_only,
+        regions=regions,
+        departments=departments,
+    )
+
+    query = f"""
+        SELECT
+            raison_sociale_du_representant_legal AS Syndic,
+            COUNT(*) AS nb_copros,
+            SUM(CAST(nombre_total_de_lots AS INT64)) AS total_lots,
+            ANY_VALUE(siret_du_representant_legal) AS Siret
+        FROM `{DATASET_TABLE}`
+        WHERE
+            raison_sociale_du_representant_legal IS NOT NULL
+            AND {where_clause}
+        GROUP BY 1
+        ORDER BY 2 DESC
+        LIMIT 500
+    """
+
+    client = get_bigquery_client()
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        logger.exception("Erreur fetch_syndics_par_territoire")
+        st.error(f"Erreur chargement syndics : {e}")
         return pd.DataFrame()
 
 
@@ -284,8 +411,8 @@ def dry_run():
     try:
         client.query(f"SELECT 1 FROM `{DATASET_TABLE}` LIMIT 1").result()
         return True
-    except Exception as e:
-        print(f"Dry-run failed: {e}")
+    except Exception:
+        logger.exception("Dry-run failed")
         return False
 
 
@@ -305,8 +432,8 @@ def init_saved_searches_table():
                 created_at TIMESTAMP
             )
         """).result()
-    except Exception as e:
-        print(f"Error creating saved_searches table: {e}")
+    except Exception:
+        logger.exception("Error creating saved_searches table")
 
 
 def get_saved_searches():
@@ -326,8 +453,8 @@ def get_saved_searches():
                 except Exception:
                     r["filters_json"] = {}
         return rows
-    except Exception as e:
-        print(f"Error loading saved searches: {e}")
+    except Exception:
+        logger.exception("Error loading saved searches")
         return []
 
 
@@ -344,8 +471,8 @@ def save_search(name, filters):
             "created_at": datetime.now().isoformat(),
         }
         client.insert_rows_json(SAVED_SEARCHES_TABLE, [row])
-    except Exception as e:
-        print(f"Error saving search: {e}")
+    except Exception:
+        logger.exception("Error saving search")
 
 
 def delete_saved_search(search_id):
@@ -354,5 +481,5 @@ def delete_saved_search(search_id):
         client.query(
             f"DELETE FROM `{SAVED_SEARCHES_TABLE}` WHERE id = '{search_id}'"
         ).result()
-    except Exception as e:
-        print(f"Error deleting saved search: {e}")
+    except Exception:
+        logger.exception("Error deleting saved search")

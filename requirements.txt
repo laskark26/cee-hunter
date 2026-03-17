@@ -6,5 +6,6 @@ db-dtypes
 duckduckgo-search
 rapidfuzz
 requests
+plotly
 openai
 beautifulsoup4
