@@ -77,9 +77,9 @@ DEPT_TO_REGION = {
 }
 
 @st.cache_data(ttl=3600)
-def fetch_communes(departments_key=None, regions_key=None, v=2):
-    """Retourne la liste triée des communes distinctes, filtrée par depts/régions."""
-    conditions = ["nom_officiel_commune IS NOT NULL", "nom_officiel_commune != ''"]
+def fetch_communes(departments_key=None, regions_key=None):
+    """Retourne la liste triée et dédupliquée des communes, filtrée par depts/régions."""
+    conditions = ["nom_officiel_commune IS NOT NULL", "TRIM(nom_officiel_commune) != ''"]
     if departments_key:
         dept_str = "', '".join(departments_key)
         conditions.append(f"code_officiel_departement IN ('{dept_str}')")
@@ -92,16 +92,23 @@ def fetch_communes(departments_key=None, regions_key=None, v=2):
             conditions.append(f"code_officiel_departement IN ('{dept_str}')")
     where = " AND ".join(conditions)
     query = f"""
-        SELECT DISTINCT UPPER(nom_officiel_commune) AS nom
+        SELECT UPPER(TRIM(nom_officiel_commune)) AS nom
         FROM `{DATASET_TABLE}`
         WHERE {where}
-        ORDER BY 1
-        LIMIT 2000
+        LIMIT 50000
     """
     client = get_bigquery_client()
     try:
         df = client.query(query).to_dataframe()
-        return sorted(df["nom"].dropna().tolist())
+        # Déduplication Python insensible à la casse et aux espaces
+        seen = set()
+        result = []
+        for name in df["nom"].dropna():
+            key = name.strip().upper()
+            if key and key not in seen:
+                seen.add(key)
+                result.append(key)
+        return sorted(result)
     except Exception:
         logger.exception("Erreur fetch_communes")
         return []
