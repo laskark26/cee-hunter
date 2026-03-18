@@ -1,9 +1,10 @@
-
-import os
-import requests
 import json
+import logging
+import os
 import re
+import requests
 from urllib.parse import urlparse
+
 import streamlit as st
 from google.cloud import bigquery
 from datetime import datetime
@@ -14,17 +15,20 @@ from rapidfuzz import fuzz
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_enrichissement"
 
+logger = logging.getLogger(__name__)
+
+
 def get_apollo_api_key():
     key = None
     if "APOLLO_API_KEY" in st.secrets:
         key = st.secrets["APOLLO_API_KEY"]
-        print(f"DEBUG: Found Apollo API Key in st.secrets (starts with {key[:4]}...)")
+        logger.debug("Found Apollo API Key in st.secrets (starts with %s...)", key[:4])
     else:
         key = os.environ.get("APOLLO_API_KEY", None)
         if key:
-            print(f"DEBUG: Found Apollo API Key in environment (starts with {key[:4]}...)")
+            logger.debug("Found Apollo API Key in environment (starts with %s...)", key[:4])
         else:
-            print("DEBUG: Apollo API Key NOT FOUND")
+            logger.debug("Apollo API Key NOT FOUND")
     return key
 
 def get_bigquery_client():
@@ -50,8 +54,8 @@ def init_enrichment_cache():
     """
     try:
         client.query(query).result()
-    except Exception as e:
-        print(f"Error creating enrichment cache: {e}")
+    except Exception:
+        logger.exception("Error creating enrichment cache")
 
 class EnrichmentManager:
     def __init__(self):
@@ -77,8 +81,8 @@ class EnrichmentManager:
             df = self.bq_client.query(query).to_dataframe()
             if not df.empty:
                 return df.iloc[0].to_dict()
-        except Exception as e:
-            print(f"Enrichment Cache Lookup Error: {e}")
+        except Exception:
+            logger.exception("Enrichment Cache Lookup Error")
         return None
 
     def save_to_cache(self, data):
@@ -89,15 +93,15 @@ class EnrichmentManager:
                  data['contacts_json'] = json.dumps(data['contacts_json'])
             
             self.bq_client.insert_rows_json(CACHE_TABLE, [data])
-        except Exception as e:
-            print(f"Enrichment Cache Save Error: {e}")
+        except Exception:
+            logger.exception("Enrichment Cache Save Error")
 
     def web_search_syndic(self, name, city):
         """Step 1: Search for official website using DuckDuckGo."""
         # Minimal query: Name + City to find the business entity
         query = f"{name} {city}"
-        print(f"Searching: {query}")
-        
+        logger.info("Searching: %s", query)
+
         try:
             with DDGS() as ddgs:
                 # Use default backend (api) usually better for business entities than 'html' if 'html' fails
@@ -111,8 +115,8 @@ class EnrichmentManager:
                         clean_results.append(r)
                         
                 return clean_results
-        except Exception as e:
-            print(f"Search Error: {e}")
+        except Exception:
+            logger.exception("Search Error")
             return []
 
     def validate_domain(self, candidate_url, syndic_name):
@@ -142,11 +146,11 @@ class EnrichmentManager:
 
     def search_apollo_org(self, domain=None, name=None):
         """Step 3a: Apollo Org Search using mixed_companies/search endpoint (most reliable)."""
-        if not self.apollo_key: 
-            print("DEBUG: Apollo search skipped - No API Key")
+        if not self.apollo_key:
+            logger.debug("Apollo search skipped - No API Key")
             return None
-        
-        print(f"DEBUG: Searching Apollo Org. Domain: {domain}, Name: {name}")
+
+        logger.debug("Searching Apollo Org. Domain: %s, Name: %s", domain, name)
         url = "https://api.apollo.io/v1/mixed_companies/search"
         headers = {
             "Content-Type": "application/json",
@@ -165,8 +169,8 @@ class EnrichmentManager:
             }
             try:
                 response = requests.post(url, headers=headers, json=data_domain, timeout=10)
-                print(f"DEBUG: Apollo Org Search (Domain) Status: {response.status_code}")
-                
+                logger.debug("Apollo Org Search (Domain) Status: %s", response.status_code)
+
                 if response.status_code == 200:
                     res = response.json()
                     # Response contains 'accounts' or 'organizations'
@@ -175,10 +179,10 @@ class EnrichmentManager:
                         # Prefer organization_id if available, fallback to id
                         item = items[0]
                         org_id = item.get('organization_id') or item.get('id')
-                        print(f"DEBUG: Found Apollo Org ID by Domain: {org_id}")
+                        logger.debug("Found Apollo Org ID by Domain: %s", org_id)
                         return org_id
-            except Exception as e:
-                print(f"DEBUG: Apollo Org Domain Error: {e}")
+            except Exception:
+                logger.debug("Apollo Org Domain Error", exc_info=True)
         
         # 2. Fallback: Try Name Search
         # If domain lookup failed or no domain provided, use name
@@ -187,7 +191,7 @@ class EnrichmentManager:
              search_name = domain.split('.')[0]
         
         if search_name and not org_id:
-            print(f"DEBUG: Trying Name Search for: {search_name}")
+            logger.debug("Trying Name Search for: %s", search_name)
             # For name search, mixed_companies might behave differently, let's stick to org search for name 
             # OR we can try q_organization_name param in mixed_companies if supported.
             # Safe bet: use the same endpoint but check params. 
@@ -206,28 +210,28 @@ class EnrichmentManager:
                     if items_name:
                         item = items_name[0]
                         org_id = item.get('organization_id') or item.get('id')
-                        print(f"DEBUG: Found Apollo Org ID by Name ({search_name}): {org_id}")
+                        logger.debug("Found Apollo Org ID by Name (%s): %s", search_name, org_id)
                         return org_id
                     else:
-                        print(f"DEBUG: No Apollo Org found by Name either: {search_name}")
+                        logger.debug("No Apollo Org found by Name either: %s", search_name)
                 else:
-                    print(f"DEBUG: Apollo Org Search (Name) Failed: {response_name.status_code}")
-            except Exception as e:
-                print(f"DEBUG: Apollo Org Name Error: {e}")
+                    logger.debug("Apollo Org Search (Name) Failed: %s", response_name.status_code)
+            except Exception:
+                logger.debug("Apollo Org Name Error", exc_info=True)
         
         return None
 
     def search_apollo_people(self, org_id=None, domain=None):
         """Step 3b: Apollo People Search. Supports direct domain search or Org ID."""
-        if not self.apollo_key: 
-            print(f"DEBUG: Apollo people search skipped - No Key")
-            return []
-        
-        if not org_id and not domain:
-            print(f"DEBUG: Apollo people search skipped - No Org ID or Domain")
+        if not self.apollo_key:
+            logger.debug("Apollo people search skipped - No Key")
             return []
 
-        print(f"DEBUG: Searching Apollo People. Org ID: {org_id}, Domain: {domain}")
+        if not org_id and not domain:
+            logger.debug("Apollo people search skipped - No Org ID or Domain")
+            return []
+
+        logger.debug("Searching Apollo People. Org ID: %s, Domain: %s", org_id, domain)
         url = "https://api.apollo.io/v1/mixed_people/api_search"
         headers = {
             "Content-Type": "application/json",
@@ -251,10 +255,10 @@ class EnrichmentManager:
         contacts = []
         try:
             response = requests.post(url, headers=headers, json=data, timeout=10)
-            print(f"DEBUG: Apollo People Search Status: {response.status_code}")
+            logger.debug("Apollo People Search Status: %s", response.status_code)
             if response.status_code == 200:
                 people = response.json().get('people', [])
-                print(f"DEBUG: Found {len(people)} people in Apollo")
+                logger.debug("Found %s people in Apollo", len(people))
                 for p in people:
                     contacts.append({
                         "first_name": p.get("first_name") or "",
@@ -265,9 +269,9 @@ class EnrichmentManager:
                         "photo_url": p.get("photo_url") or ""
                     })
             else:
-                print(f"DEBUG: Apollo People Search Failed - Status: {response.status_code}, Content: {response.text[:200]}")
-        except Exception as e:
-            print(f"DEBUG: Apollo People Error: {e}")
+                logger.debug("Apollo People Search Failed - Status: %s, Content: %s", response.status_code, response.text[:200])
+        except Exception:
+            logger.debug("Apollo People Error", exc_info=True)
             
         return contacts
 
@@ -330,13 +334,13 @@ class EnrichmentManager:
         
         # C. Web Search Fallback (Only if Pappers failed)
         if not best_domain:
-            print(f"DEBUG: Pappers fallback failed, launching web search for {name} in {city}")
+            logger.debug("Pappers fallback failed, launching web search for %s in %s", name, city)
             search_results = self.web_search_syndic(name, city)
-            print(f"DEBUG: Web search returned {len(search_results)} results")
+            logger.debug("Web search returned %s results", len(search_results))
             for res in search_results:
                 url = res.get('href', '')
                 dom, score = self.validate_domain(url, name)
-                print(f"DEBUG: Validating {url} -> Domain: {dom}, Score: {score}")
+                logger.debug("Validating %s -> Domain: %s, Score: %s", url, dom, score)
                 if dom and score > best_score:
                     best_domain = dom
                     best_score = score
@@ -344,10 +348,10 @@ class EnrichmentManager:
         
         # If no good domain found, we used to stop. Now we try Apollo with Name.
         if not best_domain:
-            print(f"DEBUG: No valid domain found for {name}. Attempting Apollo Name Search directly.")
+            logger.debug("No valid domain found for %s. Attempting Apollo Name Search directly.", name)
             source = "name_fallback"
-            
-        print(f"DEBUG: Best Domain found: {best_domain} (Source: {source}, Score: {best_score})")
+
+        logger.debug("Best Domain found: %s (Source: %s, Score: %s)", best_domain, source, best_score)
  
         # D. Apollo Enrichment
         contacts = []
@@ -357,7 +361,7 @@ class EnrichmentManager:
             
         # Fallback if no domain or no contacts found by domain
         if not contacts:
-            print(f"DEBUG: No contacts found by domain. Attempting Org ID fallback.")
+            logger.debug("No contacts found by domain. Attempting Org ID fallback.")
             org_id = self.search_apollo_org(domain=best_domain, name=name)
             if org_id:
                 contacts = self.search_apollo_people(org_id=org_id)

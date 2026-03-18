@@ -1,8 +1,9 @@
-
-import os
 import json
+import logging
+import os
 import re
 import uuid
+
 import requests
 import streamlit as st
 from urllib.parse import urlparse
@@ -18,6 +19,8 @@ ENRICHMENT_TABLE = "gen-lang-client-0045947309.rnic.syndic_enrichment"
 CONTACTS_TABLE = "gen-lang-client-0045947309.rnic.syndic_contacts"
 ANALYSIS_VERSION = 7
 DEFAULT_TTL_DAYS = 30
+
+logger = logging.getLogger(__name__)
 
 # ── SerpApi Configuration ─────────────────────────────────
 SERPAPI_KEY = st.secrets.get("SERPAPI_KEY", os.environ.get("SERPAPI_KEY", ""))
@@ -180,9 +183,9 @@ def init_intel_cache():
             if col not in existing_cols:
                 alter_query = f"ALTER TABLE `{CACHE_TABLE}` ADD COLUMN {col} {col_type}"
                 client.query(alter_query).result()
-                print(f"Migration: Added column {col}")
-    except Exception as e:
-        print(f"Error creating/migrating intel cache: {e}")
+                logger.info("Migration: Added column %s", col)
+    except Exception:
+        logger.exception("Error creating/migrating intel cache")
 
 
 def init_enrichment_tables():
@@ -216,8 +219,8 @@ def init_enrichment_tables():
                 extracted_at TIMESTAMP
             )
         """).result()
-    except Exception as e:
-        print(f"Error creating enrichment tables: {e}")
+    except Exception:
+        logger.exception("Error creating enrichment tables")
 
 
 class SyndicIntelligence:
@@ -263,8 +266,8 @@ class SyndicIntelligence:
                     except Exception:
                         pass
             return row
-        except Exception as e:
-            print(f"Intel cache lookup error: {e}")
+        except Exception:
+            logger.exception("Intel cache lookup error")
             return None
 
     def save_to_cache(self, data):
@@ -280,8 +283,8 @@ class SyndicIntelligence:
                 if isinstance(val, (dict, list)):
                     row[field] = json.dumps(val, ensure_ascii=False)
             self.bq_client.insert_rows_json(CACHE_TABLE, [row])
-        except Exception as e:
-            print(f"Intel cache save error: {e}")
+        except Exception:
+            logger.exception("Intel cache save error")
 
     # ── Enrichment persistence ───────────────────────────────
 
@@ -306,8 +309,8 @@ class SyndicIntelligence:
                 "enrichment_version": ANALYSIS_VERSION,
             }
             self.bq_client.insert_rows_json(ENRICHMENT_TABLE, [row])
-        except Exception as e:
-            print(f"Enrichment save error: {e}")
+        except Exception:
+            logger.exception("Enrichment save error")
 
     def get_enrichment(self, siret):
         try:
@@ -324,8 +327,8 @@ class SyndicIntelligence:
                     except Exception:
                         pass
             return row
-        except Exception as e:
-            print(f"Enrichment lookup error: {e}")
+        except Exception:
+            logger.exception("Enrichment lookup error")
             return None
 
     def save_contacts(self, siret, contacts, source="site_web"):
@@ -391,9 +394,9 @@ class SyndicIntelligence:
 
             if rows_to_insert:
                 self.bq_client.insert_rows_json(CONTACTS_TABLE, rows_to_insert)
-                print(f"Saved {len(rows_to_insert)} contacts to {CONTACTS_TABLE}")
-        except Exception as e:
-            print(f"Contacts save error: {e}")
+                logger.info("Saved %s contacts to %s", len(rows_to_insert), CONTACTS_TABLE)
+        except Exception:
+            logger.exception("Contacts save error")
 
     def get_contacts(self, siret):
         try:
@@ -402,8 +405,8 @@ class SyndicIntelligence:
             if df.empty:
                 return []
             return df.to_dict("records")
-        except Exception as e:
-            print(f"Contacts lookup error: {e}")
+        except Exception:
+            logger.exception("Contacts lookup error")
             return []
 
     # ── SerpApi: Google SERP Search ─────────────────────────
@@ -411,7 +414,7 @@ class SyndicIntelligence:
     def _serp_search(self, query_str, num_results=5):
         """Single Google SERP search via SerpApi. Returns list of organic results."""
         if not self.serpapi_key:
-            print("DEBUG: SerpApi key missing, skipping SERP search")
+            logger.debug("SerpApi key missing, skipping SERP search")
             return []
         try:
             params = {
@@ -429,9 +432,9 @@ class SyndicIntelligence:
                 data = resp.json()
                 return data.get("organic_results", [])
             else:
-                print(f"DEBUG: SERP search failed ({resp.status_code}): {resp.text[:200]}")
-        except Exception as e:
-            print(f"DEBUG: SERP search error: {e}")
+                logger.debug("SERP search failed (%s): %s", resp.status_code, resp.text[:200])
+        except Exception:
+            logger.debug("SERP search error", exc_info=True)
         return []
 
     def google_search(self, name, city=""):
@@ -468,7 +471,7 @@ class SyndicIntelligence:
     def google_maps_search(self, name, city="", lat=None, lon=None):
         """Search Google Maps for the syndic via SerpApi and return structured data."""
         if not self.serpapi_key:
-            print("DEBUG: SerpApi key missing, skipping Maps search")
+            logger.debug("SerpApi key missing, skipping Maps search")
             return None
         latitude = lat or 48.8566
         longitude = lon or 2.3522
@@ -490,7 +493,7 @@ class SyndicIntelligence:
                 data = resp.json()
                 results = data.get("local_results", [])
                 if not results:
-                    print(f"DEBUG: Google Maps returned 0 results for '{query_str}'")
+                    logger.debug("Google Maps returned 0 results for '%s'", query_str)
                     return None
 
                 best = self._find_best_maps_match(results, name)
@@ -507,9 +510,9 @@ class SyndicIntelligence:
                         "place_id": best.get("place_id", ""),
                     }
             else:
-                print(f"DEBUG: Maps search failed ({resp.status_code}): {resp.text[:200]}")
-        except Exception as e:
-            print(f"DEBUG: Maps search error: {e}")
+                logger.debug("Maps search failed (%s): %s", resp.status_code, resp.text[:200])
+        except Exception:
+            logger.debug("Maps search error", exc_info=True)
         return None
 
     def _find_best_maps_match(self, results, name):
@@ -639,9 +642,9 @@ class SyndicIntelligence:
                 is_priority = self._is_priority_page(final_url)
                 if is_priority or is_home:
                     team_pages_text.append(f"[PAGE: {final_url}]\n{page_text}")
-                    print(f"DEBUG: Team page detected: {final_url} (home={is_home}, priority={is_priority})")
-            except Exception as e:
-                print(f"DEBUG: Scrape error for {url}: {e}")
+                    logger.debug("Team page detected: %s (home=%s, priority=%s)", final_url, is_home, is_priority)
+            except Exception:
+                logger.debug("Scrape error for %s", url, exc_info=True)
                 continue
 
         content = "\n\n".join(all_text)[:30000]
@@ -723,7 +726,7 @@ class SyndicIntelligence:
             combined = re.sub(pattern, "", combined, flags=re.DOTALL)
         combined = re.sub(r"\s{3,}", " ", combined).strip()
 
-        print(f"DEBUG: LLM contact extraction - sending {len(combined)} chars to GPT-4o-mini")
+        logger.debug("LLM contact extraction - sending %s chars to GPT-4o-mini", len(combined))
         try:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -735,19 +738,18 @@ class SyndicIntelligence:
                 max_tokens=3000,
             )
             raw = response.choices[0].message.content.strip()
-            print(f"DEBUG: LLM raw response ({len(raw)} chars): {raw[:500]}")
+            logger.debug("LLM raw response (%s chars): %s", len(raw), raw[:500])
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             contacts = json.loads(raw)
             if isinstance(contacts, list):
-                print(f"DEBUG: LLM extracted {len(contacts)} contacts from team pages")
+                logger.debug("LLM extracted %s contacts from team pages", len(contacts))
                 return contacts
-            print(f"DEBUG: LLM response is not a list: {type(contacts)}")
+            logger.debug("LLM response is not a list: %s", type(contacts))
         except json.JSONDecodeError as e:
-            print(f"DEBUG: LLM contact JSON parse error: {e}")
-            print(f"DEBUG: LLM raw content was: {raw[:1000]}")
+            logger.debug("LLM contact JSON parse error: %s; raw: %s", e, raw[:1000])
         except Exception as e:
-            print(f"DEBUG: LLM contact extraction error: {type(e).__name__}: {e}")
+            logger.debug("LLM contact extraction error: %s: %s", type(e).__name__, e, exc_info=True)
         return []
 
     # ── SerpApi: Social & Reputation (via Google SERP) ──────
@@ -903,7 +905,7 @@ class SyndicIntelligence:
                 best_source = source
 
         for ds in sorted(domain_scores_debug, key=lambda x: x["total"], reverse=True):
-            print(f"DEBUG domain score: {ds}")
+            logger.debug("Domain score: %s", ds)
 
         if best_score >= 45:
             return best_domain, best_source, domain_scores_debug
@@ -911,7 +913,7 @@ class SyndicIntelligence:
         # Fallback: trust Google Maps URL if available
         for source, domain in candidates:
             if source == "google_maps":
-                print(f"DEBUG: Domain fallback to Google Maps: {domain} (best fuzzy score was {best_score})")
+                logger.debug("Domain fallback to Google Maps: %s (best fuzzy score was %s)", domain, best_score)
                 return domain, "google_maps_fallback", domain_scores_debug
 
         # Fallback: take the most common SERP domain
@@ -919,7 +921,7 @@ class SyndicIntelligence:
         if serp_domains:
             most_common = domain_freq.most_common(1)[0]
             if most_common[1] >= 2:
-                print(f"DEBUG: Domain fallback to most common SERP domain: {most_common[0]} (appeared {most_common[1]}x)")
+                logger.debug("Domain fallback to most common SERP domain: %s (appeared %sx)", most_common[0], most_common[1])
                 return most_common[0], "serp_fallback", domain_scores_debug
 
         return None, "none", domain_scores_debug
@@ -928,7 +930,7 @@ class SyndicIntelligence:
 
     def _fetch_apollo_contacts(self, domain=None, name=None):
         if not self.apollo_key:
-            print("DEBUG: Apollo skipped in intel - No API Key")
+            logger.debug("Apollo skipped in intel - No API Key")
             return []
 
         headers = {
@@ -951,8 +953,8 @@ class SyndicIntelligence:
                     items = resp.json().get("organizations", []) or resp.json().get("accounts", [])
                     if items:
                         org_id = items[0].get("organization_id") or items[0].get("id")
-            except Exception as e:
-                print(f"DEBUG: Apollo org domain error: {e}")
+            except Exception:
+                logger.debug("Apollo org domain error", exc_info=True)
 
         if not org_id and name:
             try:
@@ -966,8 +968,8 @@ class SyndicIntelligence:
                     items = resp.json().get("organizations", []) or resp.json().get("accounts", [])
                     if items:
                         org_id = items[0].get("organization_id") or items[0].get("id")
-            except Exception as e:
-                print(f"DEBUG: Apollo org name error: {e}")
+            except Exception:
+                logger.debug("Apollo org name error", exc_info=True)
 
         if not org_id and not domain:
             return []
@@ -1004,9 +1006,9 @@ class SyndicIntelligence:
                         "city": p.get("city") or "",
                         "department": p.get("departments", [""])[0] if p.get("departments") else "",
                     })
-                print(f"DEBUG: Apollo intel found {len(contacts)} contacts")
-        except Exception as e:
-            print(f"DEBUG: Apollo people search error: {e}")
+                logger.debug("Apollo intel found %s contacts", len(contacts))
+        except Exception:
+            logger.debug("Apollo people search error", exc_info=True)
 
         return contacts
 
@@ -1087,8 +1089,8 @@ class SyndicIntelligence:
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             return json.loads(raw)
-        except Exception as e:
-            print(f"LLM analysis error: {e}")
+        except Exception:
+            logger.exception("LLM analysis error")
             return self._fallback_analysis(social_links, legal_data, apollo_contacts, google_maps_data)
 
     def _fallback_analysis(self, social_links, legal_data, apollo_contacts=None, google_maps_data=None):
@@ -1140,7 +1142,7 @@ class SyndicIntelligence:
                          nb_copros=0, total_lots=0, force_refresh=False, lat=None, lon=None,
                          status_callback=None):
         def _status(msg):
-            print(f"DEBUG: {msg}")
+            logger.debug("%s", msg)
             if status_callback:
                 status_callback(msg)
 
@@ -1274,7 +1276,7 @@ class SyndicIntelligence:
                     all_contacts_to_save.append({**lc, "source": lc.get("source", "llm_analysis")})
 
             self.save_contacts(siret, all_contacts_to_save)
-        except Exception as e:
-            print(f"Enrichment persistence error: {e}")
+        except Exception:
+            logger.exception("Enrichment persistence error")
 
         return result

@@ -217,7 +217,7 @@ def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude
 
     return " AND ".join(conditions) if conditions else "1=1", zone_case
 
-def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None, communes=None):
+def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None, communes=None, limit=1000):
     """
     Step 2: Aggregated View.
     Returns list of filtered syndics with their total stats.
@@ -230,14 +230,14 @@ def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, ex
             raison_sociale_du_representant_legal as Syndic,
             COUNT(*) as nb_copros,
             SUM(CAST(nombre_total_de_lots AS INT64)) as total_lots,
-            ANY_VALUE(siret_du_representant_legal) as Siret
+            APPROX_TOP_COUNT(siret_du_representant_legal, 1)[OFFSET(0)].value as Siret
         FROM `{DATASET_TABLE}`
-        WHERE 
+        WHERE
             raison_sociale_du_representant_legal IS NOT NULL
             AND {where_clause}
         GROUP BY 1
         ORDER BY 2 DESC
-        LIMIT 1000
+        LIMIT {int(limit)}
     """
     
     try:
@@ -431,7 +431,7 @@ def fetch_syndics_par_territoire(filters=None, departments=None, regions=None):
             raison_sociale_du_representant_legal AS Syndic,
             COUNT(*) AS nb_copros,
             SUM(CAST(nombre_total_de_lots AS INT64)) AS total_lots,
-            ANY_VALUE(siret_du_representant_legal) AS Siret
+            APPROX_TOP_COUNT(siret_du_representant_legal, 1)[OFFSET(0)].value AS Siret
         FROM `{DATASET_TABLE}`
         WHERE
             raison_sociale_du_representant_legal IS NOT NULL
@@ -527,3 +527,263 @@ def delete_saved_search(search_id):
         ).result()
     except Exception:
         logger.exception("Error deleting saved search")
+
+
+# ── Référentiel Syndics ─────────────────────────────────────
+
+SYNDICS_TABLE = "gen-lang-client-0045947309.rnic.syndics"
+
+
+def init_syndics_table():
+    """Crée la table syndics si elle n'existe pas."""
+    client = get_bigquery_client()
+    try:
+        client.query(f"""
+            CREATE TABLE IF NOT EXISTS `{SYNDICS_TABLE}` (
+                siren STRING,
+                siret_principal STRING,
+                all_sirets STRING,
+                raison_sociale STRING,
+                nb_copros INT64,
+                total_lots INT64,
+                total_lots_habitation INT64,
+                departements STRING,
+                communes STRING,
+                zones_climatiques STRING,
+                periodes_construction STRING,
+                denomination_officielle STRING,
+                sigle STRING,
+                code_ape STRING,
+                libelle_ape STRING,
+                categorie_juridique STRING,
+                tranche_effectifs STRING,
+                date_creation STRING,
+                etat_administratif STRING,
+                adresse_siege STRING,
+                code_postal_siege STRING,
+                commune_siege STRING,
+                created_at TIMESTAMP,
+                last_updated TIMESTAMP,
+                sirene_enriched_at TIMESTAMP
+            )
+        """).result()
+    except Exception:
+        logger.exception("Erreur création table syndics")
+
+
+def populate_syndics_from_copro():
+    """
+    Agrège la table copro par SIREN pour peupler le référentiel syndics.
+    TRUNCATE + INSERT via load_table_from_dataframe.
+    Retourne le nombre de syndics insérés.
+    """
+    client = get_bigquery_client()
+
+    h1_str = "', '".join(H1_DEPARTMENTS)
+    h3_str = "', '".join(["11", "13", "30", "34", "66", "83", "2A", "2B", "06"])
+
+    query = f"""
+        SELECT
+            SUBSTR(REGEXP_REPLACE(siret_du_representant_legal, r'\\s', ''), 1, 9) AS siren,
+            APPROX_TOP_COUNT(siret_du_representant_legal, 1)[OFFSET(0)].value AS siret_principal,
+            STRING_AGG(DISTINCT siret_du_representant_legal, ',' ORDER BY siret_du_representant_legal LIMIT 50) AS all_sirets,
+            APPROX_TOP_COUNT(raison_sociale_du_representant_legal, 1)[OFFSET(0)].value AS raison_sociale,
+            COUNT(*) AS nb_copros,
+            SUM(SAFE_CAST(nombre_total_de_lots AS INT64)) AS total_lots,
+            SUM(SAFE_CAST(nombre_de_lots_a_usage_d_habitation AS INT64)) AS total_lots_habitation,
+            STRING_AGG(DISTINCT code_officiel_departement, ',' ORDER BY code_officiel_departement) AS departements,
+            STRING_AGG(DISTINCT nom_officiel_commune, ',' ORDER BY nom_officiel_commune LIMIT 20) AS communes,
+            STRING_AGG(DISTINCT
+                CASE
+                    WHEN code_officiel_departement IN ('{h1_str}') THEN 'H1'
+                    WHEN code_officiel_departement IN ('{h3_str}') THEN 'H3'
+                    ELSE 'H2'
+                END, ','
+            ) AS zones_climatiques,
+            STRING_AGG(DISTINCT periode_de_construction, ',') AS periodes_construction
+        FROM `{DATASET_TABLE}`
+        WHERE
+            siret_du_representant_legal IS NOT NULL
+            AND LENGTH(TRIM(siret_du_representant_legal)) >= 9
+            AND raison_sociale_du_representant_legal IS NOT NULL
+            AND UPPER(raison_sociale_du_representant_legal) NOT IN
+                ('IDENTITE NON PARTAGEE EN OPEN DATA', 'IDENTITÉ NON PARTAGÉE EN OPEN DATA',
+                 'NON CONNU', 'EN COURS', 'AUCUN')
+            AND UPPER(raison_sociale_du_representant_legal) NOT LIKE '%SYNDIC BENEVOLE%'
+        GROUP BY 1
+        HAVING LENGTH(siren) = 9
+    """
+
+    try:
+        df = client.query(query).to_dataframe()
+        if df.empty:
+            return 0
+
+        from datetime import datetime
+        now = datetime.utcnow().isoformat()
+        df["created_at"] = now
+        df["last_updated"] = now
+
+        # Colonnes SIRENE à NULL
+        for col in ["denomination_officielle", "sigle", "code_ape", "libelle_ape",
+                     "categorie_juridique", "tranche_effectifs", "date_creation",
+                     "etat_administratif", "adresse_siege", "code_postal_siege",
+                     "commune_siege", "sirene_enriched_at"]:
+            df[col] = None
+
+        # TRUNCATE + INSERT
+        client.query(f"DELETE FROM `{SYNDICS_TABLE}` WHERE TRUE").result()
+
+        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
+        job = client.load_table_from_dataframe(df, SYNDICS_TABLE, job_config=job_config)
+        job.result()
+
+        logger.info("Référentiel syndics peuplé : %d syndics", len(df))
+        return len(df)
+
+    except Exception:
+        logger.exception("Erreur populate_syndics_from_copro")
+        return 0
+
+
+def get_syndics_to_enrich(limit=None):
+    """Retourne la liste des (siren, siret_principal) non enrichis SIRENE."""
+    client = get_bigquery_client()
+    limit_clause = f"LIMIT {int(limit)}" if limit else ""
+    try:
+        df = client.query(f"""
+            SELECT siren, siret_principal
+            FROM `{SYNDICS_TABLE}`
+            WHERE sirene_enriched_at IS NULL
+            ORDER BY nb_copros DESC
+            {limit_clause}
+        """).to_dataframe()
+        return list(df.itertuples(index=False, name=None))
+    except Exception:
+        logger.exception("Erreur get_syndics_to_enrich")
+        return []
+
+
+def update_syndic_sirene_data(siren, data):
+    """Met à jour un syndic avec les données SIRENE."""
+    if not siren or not data:
+        return
+    client = get_bigquery_client()
+    safe_siren = siren.replace("'", "\\'")
+
+    def esc(val):
+        if val is None:
+            return "NULL"
+        return "'" + str(val).replace("'", "\\'") + "'"
+
+    try:
+        client.query(f"""
+            UPDATE `{SYNDICS_TABLE}`
+            SET
+                denomination_officielle = {esc(data.get('denomination'))},
+                sigle = {esc(data.get('sigle'))},
+                code_ape = {esc(data.get('code_ape'))},
+                libelle_ape = {esc(data.get('libelle_ape'))},
+                categorie_juridique = {esc(data.get('categorie_juridique'))},
+                tranche_effectifs = {esc(data.get('tranche_effectifs'))},
+                date_creation = {esc(data.get('date_creation'))},
+                etat_administratif = {esc(data.get('etat_administratif'))},
+                adresse_siege = {esc(data.get('adresse_siege'))},
+                code_postal_siege = {esc(data.get('code_postal_siege'))},
+                commune_siege = {esc(data.get('commune_siege'))},
+                sirene_enriched_at = CURRENT_TIMESTAMP(),
+                last_updated = CURRENT_TIMESTAMP()
+            WHERE siren = '{safe_siren}'
+        """).result()
+    except Exception:
+        logger.exception("Erreur update_syndic_sirene_data pour SIREN %s", siren)
+
+
+def get_syndic_ref(siren):
+    """Lecture d'un syndic depuis le référentiel par SIREN."""
+    if not siren:
+        return None
+    client = get_bigquery_client()
+    safe = siren.replace("'", "\\'")
+    try:
+        df = client.query(
+            f"SELECT * FROM `{SYNDICS_TABLE}` WHERE siren = '{safe}' LIMIT 1"
+        ).to_dataframe()
+        if df.empty:
+            return None
+        return df.iloc[0].to_dict()
+    except Exception:
+        logger.exception("Erreur get_syndic_ref")
+        return None
+
+
+def get_syndic_ref_by_name(raison_sociale):
+    """Recherche un syndic dans le référentiel par raison sociale (match exact insensible à la casse)."""
+    if not raison_sociale:
+        return None
+    client = get_bigquery_client()
+    safe = raison_sociale.replace("'", "\\'")
+    try:
+        df = client.query(
+            f"SELECT * FROM `{SYNDICS_TABLE}` WHERE UPPER(raison_sociale) = UPPER('{safe}') LIMIT 1"
+        ).to_dataframe()
+        if df.empty:
+            return None
+        return df.iloc[0].to_dict()
+    except Exception:
+        logger.exception("Erreur get_syndic_ref_by_name")
+        return None
+
+
+def count_total_syndics():
+    """Compte le nombre total de syndics dans le référentiel."""
+    client = get_bigquery_client()
+    try:
+        df = client.query(f"SELECT COUNT(*) as cnt FROM `{SYNDICS_TABLE}`").to_dataframe()
+        return int(df.iloc[0]["cnt"]) if not df.empty else 0
+    except Exception:
+        logger.exception("Erreur count_total_syndics")
+        return 0
+
+
+def count_enriched_syndics():
+    """Compte les syndics enrichis SIRENE."""
+    client = get_bigquery_client()
+    try:
+        df = client.query(
+            f"SELECT COUNT(*) as cnt FROM `{SYNDICS_TABLE}` WHERE sirene_enriched_at IS NOT NULL"
+        ).to_dataframe()
+        return int(df.iloc[0]["cnt"]) if not df.empty else 0
+    except Exception:
+        logger.exception("Erreur count_enriched_syndics")
+        return 0
+
+
+def fetch_syndics_table(limit=100, offset=0, filtre=None):
+    """
+    Lecture paginée de la table syndics pour l'affichage admin.
+    filtre: 'enrichi', 'non_enrichi', ou None (tous)
+    """
+    client = get_bigquery_client()
+    where = "WHERE TRUE"
+    if filtre == "enrichi":
+        where = "WHERE sirene_enriched_at IS NOT NULL"
+    elif filtre == "non_enrichi":
+        where = "WHERE sirene_enriched_at IS NULL"
+
+    try:
+        df = client.query(f"""
+            SELECT
+                raison_sociale, siren, siret_principal, nb_copros, total_lots,
+                total_lots_habitation, departements, denomination_officielle,
+                code_ape, libelle_ape, tranche_effectifs, etat_administratif,
+                commune_siege, sirene_enriched_at
+            FROM `{SYNDICS_TABLE}`
+            {where}
+            ORDER BY nb_copros DESC
+            LIMIT {int(limit)} OFFSET {int(offset)}
+        """).to_dataframe()
+        return df
+    except Exception:
+        logger.exception("Erreur fetch_syndics_table")
+        return pd.DataFrame()

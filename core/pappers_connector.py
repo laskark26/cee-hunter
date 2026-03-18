@@ -1,14 +1,18 @@
-
+import logging
 import os
-import requests
+from datetime import datetime
+
 import pandas as pd
+import requests
 import streamlit as st
 from google.cloud import bigquery
-from datetime import datetime
 
 # Configuration
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_pappers"
+
+logger = logging.getLogger(__name__)
+
 
 def get_pappers_api_key():
     if "PAPPERS_API_KEY" in st.secrets:
@@ -57,9 +61,10 @@ def init_cache_table():
             if col not in existing_cols:
                 alter_query = f"ALTER TABLE `{CACHE_TABLE}` ADD COLUMN {col} {col_type}"
                 client.query(alter_query).result()
-                print(f"Migration: Added column {col}")
-                
+                logger.info("Migration: Added column %s", col)
+
     except Exception as e:
+        logger.exception("Error initializing/migrating cache table")
         st.error(f"Error initializing/migrating cache table: {e}")
 
 def get_syndic_info(siret):
@@ -96,6 +101,7 @@ def get_syndic_info(siret):
                 return res
             # Otherwise, we continue to API to "refresh" this entry
     except Exception as e:
+        logger.exception("Cache lookup error")
         st.warning(f"⚠️ Cache lookup error: {e}")
 
     # 2. Call API (if Key exists)
@@ -146,6 +152,7 @@ def get_syndic_info(siret):
             try:
                 client.insert_rows_json(CACHE_TABLE, [result])
             except Exception as e:
+                logger.warning("Cache update failed: %s", e)
                 st.info(f"💡 Info: Cache update failed ({e})")
                 
             return result
@@ -153,9 +160,11 @@ def get_syndic_info(siret):
         elif response.status_code == 404:
             return {"nom_dirigeant": "Non trouvé", "ca_annuel": 0}
         else:
+            logger.error("Pappers API error: %s - %s", response.status_code, response.text[:500])
             st.error(f"❌ Erreur API Pappers: {response.status_code} - {response.text}")
-            
+
     except Exception as e:
+        logger.exception("Pappers API connection error")
         st.error(f"❌ Erreur de connexion API: {e}")
         
     return None
