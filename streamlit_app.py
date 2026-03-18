@@ -128,7 +128,7 @@ with _nav_col:
         st.session_state["vue_mode"] = "prospection" if _is_carte else "carte_nationale"
         st.rerun()
 with _admin_col:
-    st.page_link("pages/admin.py", label="🔧 Admin", use_container_width=True)
+    st.link_button("🔧 Admin", "/admin", use_container_width=True)
 
 if st.session_state["vue_mode"] == "prospection":
     render_stepper(st.session_state["current_step"])
