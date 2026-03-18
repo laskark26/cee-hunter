@@ -687,6 +687,15 @@ elif st.session_state["current_step"] == 2:
         # ── Pagination Info ───────────────────────────────────
         st.caption(f"Affichage de {len(df_display)} syndics sur {len(df_agg)} résultats")
 
+        csv_syndics = df_display.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Exporter CSV",
+            data=csv_syndics,
+            file_name=f"syndics_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            key="export_syndics_csv",
+        )
+
         if len(event.selection["rows"]) > 0:
             selected_index = event.selection["rows"][0]
             if search_query:
@@ -1322,6 +1331,35 @@ elif st.session_state["current_step"] == 3:
             with s3:
                 render_kpi_card("Lots moyens", lots_moy)
 
+            # ── Export CSV ────────────────────────────────────
+            _export_rows = []
+            for _idx in range(len(df_parc)):
+                _row = df_parc.iloc[_idx]
+                _urbs = urbs_cache.get(_idx) or {}
+                _export_rows.append({
+                    "N° Immat.": _row.get("numero_immatriculation_copropriete", ""),
+                    "Nom": _row.get("nom_copropriete", ""),
+                    "Adresse": _row.get("adresse_de_reference", ""),
+                    "Commune": _row.get("commune", ""),
+                    "Dép.": _row.get("code_officiel_departement", ""),
+                    "Lots hab.": _row.get("nombre_de_lots_a_usage_d_habitation", ""),
+                    "Lots total": _row.get("nombre_total_de_lots", ""),
+                    "Période": _row.get("periode_de_construction", ""),
+                    "Chauffage": _urbs.get("chauffage", ""),
+                    "Énergie": _urbs.get("energie", ""),
+                    "DPE": _urbs.get("dpe", ""),
+                    "GES": _urbs.get("ges", ""),
+                    "Année": _urbs.get("annee", ""),
+                })
+            _csv_parc = pd.DataFrame(_export_rows).to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="⬇️ Exporter CSV",
+                data=_csv_parc,
+                file_name=f"parc_cible_{syndic_name}_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="export_parc_cible_csv",
+            )
+
             # Filters
             if chauffage_values or energie_values:
                 fc1, fc2 = st.columns(2)
@@ -1430,6 +1468,15 @@ elif st.session_state["current_step"] == 3:
                     df_show = df_show[mask]
 
             st.dataframe(df_show, use_container_width=True, hide_index=True, height=400)
+
+            csv_all = df_show.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="⬇️ Exporter CSV",
+                data=csv_all,
+                file_name=f"tout_le_parc_{syndic_name}_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="export_parc_all_csv",
+            )
 
 
 # ══════════════════════════════════════════════════════════════
