@@ -117,7 +117,7 @@ st.markdown(generate_css(THEME), unsafe_allow_html=True)
 
 render_header(THEME)
 
-_nav_col, _spacer = st.columns([2, 6])
+_nav_col, _admin_col, _spacer = st.columns([2, 1, 5])
 with _nav_col:
     _is_carte = st.session_state["vue_mode"] == "carte_nationale"
     if st.button(
@@ -127,6 +127,8 @@ with _nav_col:
     ):
         st.session_state["vue_mode"] = "prospection" if _is_carte else "carte_nationale"
         st.rerun()
+with _admin_col:
+    st.page_link("pages/admin.py", label="🔧 Admin", use_container_width=True)
 
 if st.session_state["vue_mode"] == "prospection":
     render_stepper(st.session_state["current_step"])
