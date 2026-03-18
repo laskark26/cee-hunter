@@ -12,6 +12,7 @@ from core.data_manager import (
     count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES, DEPT_TO_REGION,
     init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
     fetch_stats_par_departement, aggregate_stats_par_region, fetch_syndics_par_territoire,
+    fetch_communes,
 )
 from core.urbs_connector import urbs_enrich_address, init_urbs_table
 from styles import generate_css, get_theme, score_color, PALETTE
@@ -499,6 +500,7 @@ elif st.session_state["current_step"] == 1:
     preset_lots = st.session_state.pop("preset_lots", None)
     preset_qpv = st.session_state.pop("preset_qpv", None)
     preset_departments = st.session_state.pop("preset_departments", None)
+    preset_communes = st.session_state.pop("preset_communes", None)
 
     render_divider()
 
@@ -539,6 +541,18 @@ elif st.session_state["current_step"] == 1:
             )
             selected_departments = [lbl.split(" - ")[0] for lbl in selected_dept_labels]
 
+            communes_options = fetch_communes(
+                _departments=tuple(selected_departments) if selected_departments else None,
+                _regions=tuple(selected_regions) if selected_regions else None,
+            )
+            selected_communes = st.multiselect(
+                "Villes",
+                options=communes_options,
+                default=preset_communes or [],
+                placeholder="Rechercher une ville...",
+                key="filter_communes",
+            )
+
     # ── Building Characteristics ──────────────────────────────
     with col_build:
         with st.container(border=True):
@@ -576,6 +590,8 @@ elif st.session_state["current_step"] == 1:
         chips.append(p)
     if selected_departments:
         chips.append(f"{len(selected_departments)} dép.")
+    if selected_communes:
+        chips.append(f"{len(selected_communes)} ville(s)")
     chips.append(f"{selected_lots[0]}-{selected_lots[1]} lots")
     if exclude_big:
         chips.append("Sans majors")
@@ -593,6 +609,7 @@ elif st.session_state["current_step"] == 1:
         qpv_only=qpv_only,
         regions=selected_regions,
         departments=selected_departments,
+        communes=selected_communes,
     )
     if live_count >= 0:
         st.markdown(
@@ -605,6 +622,7 @@ elif st.session_state["current_step"] == 1:
         "zones": selected_zones,
         "regions": selected_regions,
         "departments": selected_departments,
+        "communes": selected_communes,
         "lots": list(selected_lots),
         "periods": selected_periods,
         "exclude_big": exclude_big,
@@ -623,6 +641,7 @@ elif st.session_state["current_step"] == 1:
                 qpv_only=qpv_only,
                 regions=selected_regions,
                 departments=selected_departments,
+                communes=selected_communes,
             )
             go_to_step(2)
 

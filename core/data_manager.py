@@ -76,6 +76,37 @@ DEPT_TO_REGION = {
     for dept in depts
 }
 
+@st.cache_data(ttl=3600)
+def fetch_communes(_departments=None, _regions=None):
+    """Retourne la liste triée des communes distinctes, filtrée par depts/régions."""
+    conditions = ["commune IS NOT NULL", "commune != ''"]
+    if _departments:
+        dept_str = "', '".join(_departments)
+        conditions.append(f"code_officiel_departement IN ('{dept_str}')")
+    elif _regions:
+        dept_list = []
+        for r in _regions:
+            dept_list.extend(REGIONS_DEPARTMENTS.get(r, []))
+        if dept_list:
+            dept_str = "', '".join(dept_list)
+            conditions.append(f"code_officiel_departement IN ('{dept_str}')")
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT DISTINCT commune
+        FROM `{DATASET_TABLE}`
+        WHERE {where}
+        ORDER BY commune
+        LIMIT 2000
+    """
+    client = get_bigquery_client()
+    try:
+        df = client.query(query).to_dataframe()
+        return sorted(df["commune"].dropna().tolist())
+    except Exception:
+        logger.exception("Erreur fetch_communes")
+        return []
+
+
 def get_climate_zone(code_dept):
     """
     Categorizes a French department into a specific climatic zone (H1, H2, H3).
@@ -97,7 +128,7 @@ def get_bigquery_client():
         return bigquery.Client.from_service_account_info(info)
     return bigquery.Client(project=PROJECT_ID)
 
-def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None):
+def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None, communes=None):
     """
     Constructs a SQL WHERE clause based on UI filters.
     Includes custom logic for construction periods and syndic exclusions.
@@ -170,19 +201,25 @@ def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude
         if dept_list:
             dept_str = "', '".join(dept_list)
             conditions.append(f"code_officiel_departement IN ('{dept_str}')")
-        
+
+    # 7. Filtre commune
+    if communes:
+        communes_escaped = [c.replace("'", "\\'") for c in communes]
+        communes_str = "', '".join(communes_escaped)
+        conditions.append(f"commune IN ('{communes_str}')")
+
     return " AND ".join(conditions) if conditions else "1=1", zone_case
 
-def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None):
+def fetch_aggregated_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None, communes=None):
     """
     Step 2: Aggregated View.
     Returns list of filtered syndics with their total stats.
     """
     client = get_bigquery_client()
-    where_clause, zone_case = build_filter_clause(climate_zones, min_lots, max_lots, periods, exclude_big_syndics, qpv_only, regions=regions, departments=departments)
-    
+    where_clause, zone_case = build_filter_clause(climate_zones, min_lots, max_lots, periods, exclude_big_syndics, qpv_only, regions=regions, departments=departments, communes=communes)
+
     query = f"""
-        SELECT 
+        SELECT
             raison_sociale_du_representant_legal as Syndic,
             COUNT(*) as nb_copros,
             SUM(CAST(nombre_total_de_lots AS INT64)) as total_lots,
@@ -247,12 +284,12 @@ def fetch_data_by_syndic(syndic_name, climate_zones, min_lots, max_lots, periods
         st.error(f"Error fetching details for syndic: {e}")
         return pd.DataFrame()
 
-def count_matching_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None):
+def count_matching_syndics(climate_zones, min_lots, max_lots, periods=None, exclude_big_syndics=False, qpv_only=False, regions=None, departments=None, communes=None):
     """Lightweight COUNT query for live preview of matching syndics."""
     client = get_bigquery_client()
     where_clause, zone_case = build_filter_clause(
         climate_zones, min_lots, max_lots, periods,
-        exclude_big_syndics, qpv_only, regions=regions, departments=departments,
+        exclude_big_syndics, qpv_only, regions=regions, departments=departments, communes=communes,
     )
     query = f"""
         SELECT COUNT(DISTINCT raison_sociale_du_representant_legal) as cnt
