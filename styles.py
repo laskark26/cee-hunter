@@ -294,27 +294,49 @@ def generate_css(theme_name: str) -> str:
     .cee-copro-card {{
         background: {t['card_bg']};
         border: 1px solid {t['card_border']};
+        border-left: 3px solid {t['accent']};
         border-radius: {RADIUS['md']};
         padding: {SP['md']};
         box-shadow: {t['card_shadow']};
         margin-bottom: {SP['sm']};
-        transition: border-color 0.15s ease;
+        transition: box-shadow 0.15s ease, border-color 0.15s ease;
     }}
     .cee-copro-card:hover {{
-        border-color: {t['accent']};
+        box-shadow: 0 4px 16px rgba(16,185,129,0.12);
+    }}
+    .cee-copro-header {{
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 4px;
     }}
     .cee-copro-card h4 {{
-        font-size: 13px !important;
-        font-weight: 600 !important;
+        font-size: 14px !important;
+        font-weight: 700 !important;
         color: {t['text']} !important;
-        margin: 0 0 8px 0 !important;
+        margin: 0 !important;
         line-height: 1.3 !important;
+        flex: 1;
+    }}
+    .cee-copro-lots {{
+        font-size: 13px;
+        font-weight: 700;
+        color: {t['accent']};
+        white-space: nowrap;
+        flex-shrink: 0;
+    }}
+    .cee-copro-address {{
+        font-size: 12px;
+        color: {t['text_secondary']};
+        margin: 4px 0 8px 0 !important;
+        line-height: 1.4;
     }}
     .cee-copro-meta {{
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 8px;
+        gap: 6px;
+        margin-top: 6px;
     }}
     .cee-copro-badge {{
         display: inline-flex;

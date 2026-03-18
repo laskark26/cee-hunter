@@ -289,13 +289,16 @@ def render_copro_card(name: str, address: str, lots: int, period: str, urbs_data
         if badges:
             urbs_html = f'<div class="cee-copro-meta" style="margin-top:4px;">{"".join(badges)}</div>'
 
+    lots_display = f"{lots:,}".replace(",", "\u202f")
     st.markdown(
         f'<div class="cee-copro-card">'
+        f'<div class="cee-copro-header">'
         f'<h4>{name or "Copropriété"}</h4>'
+        f'<span class="cee-copro-lots">{lots_display} lots</span>'
+        f'</div>'
         f'{immat_html}'
-        f'<p style="font-size:12px;color:#6B7280;margin:0 0 8px 0;">{address}{earth_link}</p>'
+        f'<p class="cee-copro-address">{address}{earth_link}</p>'
         f'<div class="cee-copro-meta">'
-        f'<span class="cee-copro-badge">🏠 {lots} lots</span>'
         f'<span class="cee-copro-badge">🏗️ {period_display}</span>'
         f'</div>'
         f'{urbs_html}'

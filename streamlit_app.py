@@ -12,9 +12,10 @@ from core.data_manager import (
     count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES, DEPT_TO_REGION,
     init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
     fetch_stats_par_departement, aggregate_stats_par_region, fetch_syndics_par_territoire,
-    fetch_communes,
+    fetch_communes, init_syndics_table, get_syndic_ref_by_name,
 )
 from core.urbs_connector import urbs_enrich_address, init_urbs_table
+from core.sirene_connector import init_cache_table as init_sirene_cache
 from styles import generate_css, get_theme, score_color, PALETTE
 from components import (
     render_header, render_stepper, render_kpi_card, render_score_gauge,
@@ -436,6 +437,11 @@ elif st.session_state["current_step"] == 1:
         init_urbs_table()
         st.session_state["urbs_table_init"] = True
 
+    if "syndics_table_init" not in st.session_state:
+        init_syndics_table()
+        init_sirene_cache()
+        st.session_state["syndics_table_init"] = True
+
     if "saved_searches_cache" not in st.session_state:
         st.session_state["saved_searches_cache"] = get_saved_searches()
     saved_searches = st.session_state["saved_searches_cache"]
@@ -829,6 +835,34 @@ elif st.session_state["current_step"] == 3:
             f'<p style="margin:0;font-size:12px;color:{t["text_secondary"]};">📞 {tel_p} · 📧 {email_p} · 🌐 {web_p}</p>',
             icon="🏛️",
         )
+
+        # ── Informations légales SIRENE ──────────────────────
+        syndic_ref = get_syndic_ref_by_name(syndic_name)
+        if syndic_ref and syndic_ref.get("sirene_enriched_at"):
+            sr = syndic_ref
+            denomination = sr.get("denomination_officielle") or "—"
+            sigle_sr = sr.get("sigle") or ""
+            sigle_display = f" ({sigle_sr})" if sigle_sr else ""
+            ape_sr = sr.get("code_ape") or "—"
+            libelle_ape = sr.get("libelle_ape") or ""
+            ape_display = f"{ape_sr} — {libelle_ape}" if libelle_ape else ape_sr
+            effectifs = sr.get("tranche_effectifs") or "—"
+            date_crea = sr.get("date_creation") or "—"
+            etat = "Actif" if sr.get("etat_administratif") == "A" else ("Cessé" if sr.get("etat_administratif") == "C" else (sr.get("etat_administratif") or "—"))
+            etat_color = PALETTE["primary"] if etat == "Actif" else PALETTE["error"]
+            adresse = sr.get("adresse_siege") or ""
+            cp = sr.get("code_postal_siege") or ""
+            commune = sr.get("commune_siege") or ""
+            adresse_full = f"{adresse}, {cp} {commune}".strip(", ") if adresse or cp else "—"
+
+            render_info_card(
+                "Informations légales (INSEE SIRENE)",
+                f'<p style="margin:0 0 4px 0;"><strong>{denomination}</strong>{sigle_display} · SIREN {sr.get("siren", "—")}</p>'
+                f'<p style="margin:0 0 4px 0;"><strong>Activité</strong> : {ape_display} · <strong>Effectifs</strong> : {effectifs}</p>'
+                f'<p style="margin:0 0 4px 0;"><strong>Création</strong> : {date_crea} · <strong>État</strong> : <span style="color:{etat_color};font-weight:600;">{etat}</span></p>'
+                f'<p style="margin:0;font-size:12px;color:{t["text_secondary"]};">📍 {adresse_full}</p>',
+                icon="📋",
+            )
 
         # ── Intelligence Data ─────────────────────────────────
         intel_key = f"intel_data_{syndic_siret}"
@@ -1351,7 +1385,7 @@ elif st.session_state["current_step"] == 3:
             if len(df_parc) <= SEUIL_URBS or st.session_state.get(enrich_key):
                 for idx in range(len(df_parc)):
                     row = df_parc.iloc[idx]
-                    address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
+                    address = str(row.get('adresse_de_reference', '') or '').strip()
                     _raw_immat = row.get("numero_d_immatriculation", "")
                     numero_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and str(_raw_immat).strip() not in ("", "nan", "None") else ""
                     data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
@@ -1446,7 +1480,7 @@ elif st.session_state["current_step"] == 3:
                             _raw_immat = row.get("numero_d_immatriculation", "")
                             num_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and _raw_immat else ""
                             copro_name = nom_copro or num_immat or f"Copro #{idx+1}"
-                            address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
+                            address = str(row.get('adresse_de_reference', '') or '').strip()
                             try:
                                 lots = int(float(row.get(lots_col, 0) or 0))
                             except (ValueError, TypeError):
