@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 
@@ -9,6 +10,8 @@ PROJECT_ID = "gen-lang-client-0045947309"
 URBS_BASE_URL = "https://api.urbs.fr"
 URBS_ATTRIBUTES = "chauffageurbs,energieurbs,jannatmin,dpeurbs"
 URBS_TABLE = "gen-lang-client-0045947309.rnic.urbs_building_data"
+
+logger = logging.getLogger(__name__)
 
 
 def _get_bq_client():
@@ -41,8 +44,8 @@ def init_urbs_table():
                 fetched_at TIMESTAMP
             )
         """).result()
-    except Exception as e:
-        print(f"Error creating URBS table: {e}")
+    except Exception:
+        logger.exception("Error creating URBS table")
 
 
 def get_urbs_from_db(numero_immat):
@@ -65,8 +68,8 @@ def get_urbs_from_db(numero_immat):
             "dpe": row.get("dpe", "") or "",
             "ges": row.get("ges", "") or "",
         }
-    except Exception as e:
-        print(f"URBS DB read error: {e}")
+    except Exception:
+        logger.exception("URBS DB read error")
         return None
 
 
@@ -92,9 +95,11 @@ def save_urbs_to_db(numero_immat, address, imope_id, data):
             "ges": data.get("ges", ""),
             "fetched_at": datetime.utcnow().isoformat(),
         }
-        client.insert_rows_json(URBS_TABLE, [row])
-    except Exception as e:
-        print(f"URBS DB save error: {e}")
+        errors = client.insert_rows_json(URBS_TABLE, [row])
+        if errors:
+            logger.warning("URBS DB insert errors: %s", errors)
+    except Exception:
+        logger.exception("URBS DB save error")
 
 
 # ── API calls ─────────────────────────────────────────────────
@@ -115,8 +120,8 @@ def urbs_geocode(address):
             results = resp.json()
             if isinstance(results, list) and results:
                 return results[0].get("id")
-    except Exception as e:
-        print(f"URBS geocode error: {e}")
+    except Exception:
+        logger.exception("URBS geocode error")
     return None
 
 
@@ -155,8 +160,8 @@ def urbs_get_attributes(imope_id):
                 "dpe": dpe,
                 "ges": ges,
             }
-    except Exception as e:
-        print(f"URBS dashboard error: {e}")
+    except Exception:
+        logger.exception("URBS dashboard error")
     return None
 
 

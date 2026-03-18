@@ -1293,7 +1293,8 @@ elif st.session_state["current_step"] == 3:
                 for idx in range(len(df_parc)):
                     row = df_parc.iloc[idx]
                     address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
-                    numero_immat = str(row.get("numero_immatriculation_copropriete", ""))
+                    _raw_immat = row.get("numero_immatriculation_copropriete", "")
+                    numero_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and str(_raw_immat).strip() not in ("", "nan", "None") else ""
                     data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
                     urbs_cache[idx] = data
                     if data:
