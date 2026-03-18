@@ -77,7 +77,7 @@ DEPT_TO_REGION = {
 }
 
 @st.cache_data(ttl=3600)
-def fetch_communes(departments_key=None, regions_key=None):
+def fetch_communes(departments_key=None, regions_key=None, v=2):
     """Retourne la liste triée des communes distinctes, filtrée par depts/régions."""
     conditions = ["nom_officiel_commune IS NOT NULL", "nom_officiel_commune != ''"]
     if departments_key:
