@@ -77,31 +77,31 @@ DEPT_TO_REGION = {
 }
 
 @st.cache_data(ttl=3600)
-def fetch_communes(_departments=None, _regions=None):
+def fetch_communes(departments_key=None, regions_key=None):
     """Retourne la liste triée des communes distinctes, filtrée par depts/régions."""
-    conditions = ["commune IS NOT NULL", "commune != ''"]
-    if _departments:
-        dept_str = "', '".join(_departments)
+    conditions = ["nom_officiel_commune IS NOT NULL", "nom_officiel_commune != ''"]
+    if departments_key:
+        dept_str = "', '".join(departments_key)
         conditions.append(f"code_officiel_departement IN ('{dept_str}')")
-    elif _regions:
+    elif regions_key:
         dept_list = []
-        for r in _regions:
+        for r in regions_key:
             dept_list.extend(REGIONS_DEPARTMENTS.get(r, []))
         if dept_list:
             dept_str = "', '".join(dept_list)
             conditions.append(f"code_officiel_departement IN ('{dept_str}')")
     where = " AND ".join(conditions)
     query = f"""
-        SELECT DISTINCT commune
+        SELECT DISTINCT nom_officiel_commune
         FROM `{DATASET_TABLE}`
         WHERE {where}
-        ORDER BY commune
+        ORDER BY nom_officiel_commune
         LIMIT 2000
     """
     client = get_bigquery_client()
     try:
         df = client.query(query).to_dataframe()
-        return sorted(df["commune"].dropna().tolist())
+        return sorted(df["nom_officiel_commune"].dropna().tolist())
     except Exception:
         logger.exception("Erreur fetch_communes")
         return []
@@ -206,7 +206,7 @@ def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude
     if communes:
         communes_escaped = [c.replace("'", "\\'") for c in communes]
         communes_str = "', '".join(communes_escaped)
-        conditions.append(f"commune IN ('{communes_str}')")
+        conditions.append(f"nom_officiel_commune IN ('{communes_str}')")
 
     return " AND ".join(conditions) if conditions else "1=1", zone_case
 

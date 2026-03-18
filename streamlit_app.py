@@ -542,8 +542,8 @@ elif st.session_state["current_step"] == 1:
             selected_departments = [lbl.split(" - ")[0] for lbl in selected_dept_labels]
 
             communes_options = fetch_communes(
-                _departments=tuple(selected_departments) if selected_departments else None,
-                _regions=tuple(selected_regions) if selected_regions else None,
+                departments_key=tuple(selected_departments) if selected_departments else None,
+                regions_key=tuple(selected_regions) if selected_regions else None,
             )
             selected_communes = st.multiselect(
                 "Villes",
