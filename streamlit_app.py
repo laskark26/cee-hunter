@@ -1352,7 +1352,7 @@ elif st.session_state["current_step"] == 3:
                 for idx in range(len(df_parc)):
                     row = df_parc.iloc[idx]
                     address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
-                    _raw_immat = row.get("numero_immatriculation_copropriete", "")
+                    _raw_immat = row.get("numero_d_immatriculation", "")
                     numero_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and str(_raw_immat).strip() not in ("", "nan", "None") else ""
                     data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
                     urbs_cache[idx] = data
@@ -1407,8 +1407,8 @@ elif st.session_state["current_step"] == 3:
             # ── Export CSV parc ciblé ─────────────────────────
             if filtered_indices:
                 _cols_export = {
-                    "numero_immatriculation_copropriete": "N° Immat.",
-                    "nom_copropriete": "Nom",
+                    "numero_d_immatriculation": "N° Immat.",
+                    "nom_d_usage_de_la_copropriete": "Nom",
                     "adresse_de_reference": "Adresse",
                     "commune": "Commune",
                     "code_officiel_departement": "Dép.",
@@ -1441,9 +1441,9 @@ elif st.session_state["current_step"] == 3:
                         if i + j < len(filtered_indices):
                             idx = filtered_indices[i + j]
                             row = df_parc.iloc[idx]
-                            _raw_nom = row.get("nom_copropriete", "")
+                            _raw_nom = row.get("nom_d_usage_de_la_copropriete", "")
                             nom_copro = str(_raw_nom).strip() if pd.notna(_raw_nom) and _raw_nom else ""
-                            _raw_immat = row.get("numero_immatriculation_copropriete", "")
+                            _raw_immat = row.get("numero_d_immatriculation", "")
                             num_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and _raw_immat else ""
                             copro_name = nom_copro or num_immat or f"Copro #{idx+1}"
                             address = f"{row.get('adresse_de_reference', '')} {row.get('commune', '')}".strip()
@@ -1489,8 +1489,8 @@ elif st.session_state["current_step"] == 3:
             display_cols = []
             col_mapping = {}
             desired = {
-                "numero_immatriculation_copropriete": "N° Immat.",
-                "nom_copropriete": "Nom",
+                "numero_d_immatriculation": "N° Immat.",
+                "nom_d_usage_de_la_copropriete": "Nom",
                 "adresse_de_reference": "Adresse",
                 "commune": "Commune",
                 "code_officiel_departement": "Dép.",
