@@ -92,16 +92,16 @@ def fetch_communes(departments_key=None, regions_key=None):
             conditions.append(f"code_officiel_departement IN ('{dept_str}')")
     where = " AND ".join(conditions)
     query = f"""
-        SELECT DISTINCT nom_officiel_commune
+        SELECT DISTINCT UPPER(nom_officiel_commune) AS nom
         FROM `{DATASET_TABLE}`
         WHERE {where}
-        ORDER BY nom_officiel_commune
+        ORDER BY 1
         LIMIT 2000
     """
     client = get_bigquery_client()
     try:
         df = client.query(query).to_dataframe()
-        return sorted(df["nom_officiel_commune"].dropna().tolist())
+        return sorted(df["nom"].dropna().tolist())
     except Exception:
         logger.exception("Erreur fetch_communes")
         return []
@@ -202,11 +202,11 @@ def build_filter_clause(climate_zones, min_lots, max_lots, periods=None, exclude
             dept_str = "', '".join(dept_list)
             conditions.append(f"code_officiel_departement IN ('{dept_str}')")
 
-    # 7. Filtre commune
+    # 7. Filtre commune (comparaison insensible à la casse)
     if communes:
-        communes_escaped = [c.replace("'", "\\'") for c in communes]
-        communes_str = "', '".join(communes_escaped)
-        conditions.append(f"nom_officiel_commune IN ('{communes_str}')")
+        communes_upper = [c.upper().replace("'", "\\'") for c in communes]
+        communes_str = "', '".join(communes_upper)
+        conditions.append(f"UPPER(nom_officiel_commune) IN ('{communes_str}')")
 
     return " AND ".join(conditions) if conditions else "1=1", zone_case
 
