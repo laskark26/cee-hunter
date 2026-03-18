@@ -71,6 +71,9 @@ defaults = {
     "carte_niveau": "region",
     "carte_region_selected": None,
     "carte_df_dept": None,
+    # Navigation retour
+    "last_search_query": "",
+    "last_selected_syndic_name": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -672,8 +675,34 @@ elif st.session_state["current_step"] == 2:
 
         st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
 
+        # ── Bandeau reprise ───────────────────────────────────
+        last_syndic = st.session_state.get("last_selected_syndic_name")
+        if last_syndic:
+            _r1, _r2, _r3 = st.columns([4, 2, 1])
+            with _r1:
+                st.markdown(
+                    f'<div style="padding:8px 12px;background:#10B98115;border-left:3px solid #10B981;'
+                    f'border-radius:6px;font-size:13px;color:#065F46;">Dernière fiche consultée : <strong>{last_syndic}</strong></div>',
+                    unsafe_allow_html=True,
+                )
+            with _r2:
+                if st.button("Reprendre cette fiche →", key="btn_resume_syndic", use_container_width=True):
+                    go_to_step(3)
+            with _r3:
+                if st.button("✕", key="btn_clear_resume", help="Effacer", use_container_width=True):
+                    st.session_state["last_selected_syndic_name"] = None
+                    st.rerun()
+            st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+
         # ── Search Bar ────────────────────────────────────────
-        search_query = st.text_input("🔍 Rechercher un syndic...", placeholder="Nom du syndic...", label_visibility="collapsed")
+        search_query = st.text_input(
+            "🔍 Rechercher un syndic...",
+            placeholder="Nom du syndic...",
+            label_visibility="collapsed",
+            value=st.session_state.get("last_search_query", ""),
+            key="syndic_search_input",
+        )
+        st.session_state["last_search_query"] = search_query
 
         df_display = df_agg[["Syndic", "Siret", "nb_copros", "total_lots"]].rename(
             columns={"nb_copros": "Immeubles", "total_lots": "Lots"}
@@ -723,6 +752,7 @@ elif st.session_state["current_step"] == 2:
             else:
                 selected_row = df_agg.iloc[selected_index]
             st.session_state["selected_syndic_row"] = selected_row
+            st.session_state["last_selected_syndic_name"] = selected_row["Syndic"]
             go_to_step(3)
 
 
