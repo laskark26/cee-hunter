@@ -107,36 +107,27 @@ st.divider()
 # ── Section 2 : Enrichissement SIRENE ────────────────────────
 
 st.subheader("2. Enrichissement SIRENE INSEE")
-st.caption("Appelle l'API SIRENE pour chaque syndic non enrichi. Rate limit : 30 req/min → ~2s entre chaque appel.")
-
-col_batch, col_btn = st.columns([1, 2])
-with col_batch:
-    batch_size = st.number_input(
-        "Taille du batch",
-        min_value=1,
-        max_value=500,
-        value=50,
-        step=10,
-        help="Nombre de syndics à enrichir en une fois.",
-    )
+st.caption("Appelle l'API SIRENE pour chaque syndic non enrichi. Rate limit : ~25 req/min (2 appels/syndic). Enrichit tous les syndics restants.")
 
 non_enrichis = total - enriched
 st.info(f"{non_enrichis:,} syndics restants à enrichir.".replace(",", " "))
 
-if st.button("Lancer l'enrichissement SIRENE", type="primary", use_container_width=False):
-    syndics = get_syndics_to_enrich(limit=batch_size)
+if st.button("Lancer l'enrichissement SIRENE (tous)", type="primary", use_container_width=False):
+    syndics = get_syndics_to_enrich()  # Tous les non-enrichis
     if not syndics:
         st.warning("Aucun syndic à enrichir. Le référentiel est complet ou vide.")
     else:
         progress = st.progress(0, text="Démarrage...")
-        status_container = st.empty()
+        status_text = st.empty()
+        stats_text = st.empty()
         errors = 0
         enriched_count = 0
+        total_to_do = len(syndics)
 
         for i, (siren, siret) in enumerate(syndics):
             progress.progress(
-                (i + 1) / len(syndics),
-                text=f"[{i + 1}/{len(syndics)}] SIREN {siren}",
+                (i + 1) / total_to_do,
+                text=f"[{i + 1}/{total_to_do}] SIREN {siren}",
             )
 
             data = enrich_siren(siren, siret=siret)
@@ -146,13 +137,19 @@ if st.button("Lancer l'enrichissement SIRENE", type="primary", use_container_wid
             else:
                 errors += 1
 
-            # Rate limit : 30 req/min ≈ 2s entre chaque appel
-            # On fait 2 appels par syndic (siren + siret), donc 4s
-            time.sleep(2)
+            # Stats en temps réel toutes les 10 itérations
+            if (i + 1) % 10 == 0 or (i + 1) == total_to_do:
+                elapsed_pct = round((i + 1) / total_to_do * 100, 1)
+                stats_text.caption(
+                    f"Progression : {enriched_count} enrichis, {errors} erreurs — {elapsed_pct}%"
+                )
+
+            # Rate limit : 2 appels/syndic (siren + siret) → 2.5s = ~24 req/min
+            time.sleep(2.5)
 
         progress.progress(1.0, text="Terminé !")
         st.success(
-            f"Enrichissement terminé : {enriched_count} enrichis, {errors} erreurs sur {len(syndics)} syndics."
+            f"Enrichissement terminé : {enriched_count} enrichis, {errors} erreurs sur {total_to_do} syndics."
         )
         st.rerun()
 
