@@ -12,7 +12,7 @@ from core.data_manager import (
     count_matching_syndics, REGIONS_DEPARTMENTS, DEPARTMENTS_NAMES, DEPT_TO_REGION,
     init_saved_searches_table, get_saved_searches, save_search, delete_saved_search,
     fetch_stats_par_departement, aggregate_stats_par_region, fetch_syndics_par_territoire,
-    fetch_communes, init_syndics_table, get_syndic_ref_by_name,
+    fetch_communes, init_syndics_table, get_syndic_ref_by_name, search_syndic_direct,
 )
 from core.urbs_connector import urbs_enrich_address, init_urbs_table
 from core.sirene_connector import init_cache_table as init_sirene_cache
@@ -427,6 +427,38 @@ if st.session_state["vue_mode"] == "carte_nationale":
     render_vue_nationale(THEME, t)
 
 elif st.session_state["current_step"] == 1:
+
+    # ── Accès direct ──────────────────────────────────────────
+    render_section_label("🔍 Accès direct à un syndic")
+    _sq_col, _ = st.columns([3, 3])
+    with _sq_col:
+        direct_query = st.text_input(
+            "Nom ou SIRET",
+            placeholder="Ex: Citya, 12345678901234...",
+            key="direct_syndic_search",
+            label_visibility="collapsed",
+        )
+    if direct_query and len(direct_query.strip()) >= 3:
+        _results = search_syndic_direct(direct_query.strip())
+        if _results.empty:
+            st.caption("Aucun syndic trouvé.")
+        else:
+            st.caption(f"{len(_results)} résultat(s)")
+            for _, _row in _results.iterrows():
+                _rc1, _rc2 = st.columns([5, 1])
+                with _rc1:
+                    st.markdown(
+                        f"**{_row['Syndic']}** &nbsp;·&nbsp; "
+                        f"{int(_row['nb_copros'])} imm. &nbsp;·&nbsp; "
+                        f"SIRET `{_row['Siret']}`"
+                    )
+                with _rc2:
+                    if st.button("Voir →", key=f"dr_{_row['Siret']}_{str(_row['Syndic'])[:10]}"):
+                        st.session_state["selected_syndic_row"] = _row
+                        st.session_state["last_selected_syndic_name"] = _row["Syndic"]
+                        go_to_step(3)
+
+    render_divider()
 
     # ── Presets ───────────────────────────────────────────────
     render_section_label("Recherche rapide")
@@ -1539,17 +1571,60 @@ elif st.session_state["current_step"] == 3:
                     display_cols.append(col_name)
                     col_mapping[col_name] = label
 
-            if display_cols:
-                df_show = df_all[display_cols].rename(columns=col_mapping)
-            else:
-                df_show = df_all
+            # ── Filtres ───────────────────────────────────────────
+            _f1, _f2, _f3 = st.columns([2, 2, 2])
+            with _f1:
+                commune_filter = st.text_input(
+                    "Commune", key="commune_filter_all",
+                    placeholder="Filtrer par commune...", label_visibility="collapsed",
+                )
+            with _f2:
+                _periods_raw = sorted(df_all["periode_de_construction"].dropna().unique().tolist()) if "periode_de_construction" in df_all.columns else []
+                _period_options = [PERIOD_LABELS.get(p, p) for p in _periods_raw]
+                _period_map_all = {PERIOD_LABELS.get(p, p): p for p in _periods_raw}
+                selected_periods_all = st.multiselect(
+                    "Périodes", options=_period_options, default=[],
+                    placeholder="Toutes les périodes...", key="period_filter_all",
+                )
+            with _f3:
+                if lots_col in df_all.columns:
+                    _lots_min = int(df_all[lots_col].min() or 0)
+                    _lots_max = int(df_all[lots_col].max() or 1000)
+                    if _lots_min < _lots_max:
+                        lots_range_all = st.slider(
+                            "Lots hab.", _lots_min, _lots_max,
+                            (_lots_min, _lots_max), key="lots_filter_all",
+                        )
+                    else:
+                        lots_range_all = (_lots_min, _lots_max)
+                else:
+                    lots_range_all = (0, 9999)
 
-            # Filter by commune
-            if "commune" in df_all.columns:
-                commune_filter = st.text_input("Filtrer par commune...", key="commune_filter_all", placeholder="Nom de commune...", label_visibility="collapsed")
-                if commune_filter:
-                    mask = df_show["Commune"].str.contains(commune_filter, case=False, na=False) if "Commune" in df_show.columns else pd.Series([True] * len(df_show))
-                    df_show = df_show[mask]
+            # Appliquer les filtres sur df_all
+            df_filtered_all = df_all.copy()
+            if commune_filter and "commune" in df_filtered_all.columns:
+                df_filtered_all = df_filtered_all[
+                    df_filtered_all["commune"].str.contains(commune_filter, case=False, na=False)
+                ]
+            if selected_periods_all and "periode_de_construction" in df_filtered_all.columns:
+                _db_periods = [_period_map_all[p] for p in selected_periods_all if p in _period_map_all]
+                df_filtered_all = df_filtered_all[df_filtered_all["periode_de_construction"].isin(_db_periods)]
+            if lots_col in df_filtered_all.columns:
+                df_filtered_all = df_filtered_all[
+                    (df_filtered_all[lots_col] >= lots_range_all[0]) &
+                    (df_filtered_all[lots_col] <= lots_range_all[1])
+                ]
+
+            # Construire df_show depuis df_filtered_all
+            if display_cols:
+                df_show = df_filtered_all[
+                    [c for c in display_cols if c in df_filtered_all.columns]
+                ].rename(columns=col_mapping)
+            else:
+                df_show = df_filtered_all
+
+            if len(df_filtered_all) < nb_all:
+                st.caption(f"{len(df_filtered_all)} / {nb_all} bâtiments après filtres")
 
             _tbl_col, _dl_col = st.columns([4, 1])
             with _tbl_col:

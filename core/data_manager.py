@@ -312,6 +312,37 @@ def count_matching_syndics(climate_zones, min_lots, max_lots, periods=None, excl
         return -1
 
 
+@st.cache_data(ttl=120)
+def search_syndic_direct(query, limit=20):
+    """Recherche un syndic par nom (sous-chaîne) ou SIRET."""
+    client = get_bigquery_client()
+    safe = query.strip().replace("'", "\\'")
+    safe_upper = safe.upper()
+    sql = f"""
+        SELECT
+            raison_sociale_du_representant_legal AS Syndic,
+            APPROX_TOP_COUNT(siret_du_representant_legal, 1)[OFFSET(0)].value AS Siret,
+            COUNT(*) AS nb_copros,
+            SUM(CAST(nombre_total_de_lots AS INT64)) AS total_lots
+        FROM `{DATASET_TABLE}`
+        WHERE
+            raison_sociale_du_representant_legal IS NOT NULL
+            AND (
+                UPPER(raison_sociale_du_representant_legal) LIKE '%{safe_upper}%'
+                OR siret_du_representant_legal LIKE '%{safe}%'
+            )
+        GROUP BY 1
+        ORDER BY nb_copros DESC
+        LIMIT {int(limit)}
+    """
+    try:
+        df = client.query(sql).to_dataframe()
+        return df
+    except Exception:
+        logger.exception("Erreur search_syndic_direct")
+        return pd.DataFrame()
+
+
 def fetch_all_data_by_syndic(syndic_name):
     """Fetch ALL copros for a syndic without any filter (for 'Tout le parc' tab)."""
     client = get_bigquery_client()
