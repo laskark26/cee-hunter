@@ -17,7 +17,7 @@ from google.cloud import bigquery
 # ── Configuration ────────────────────────────────────────────
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_sirene"
-INSEE_SIRENE_BASE = "https://api.insee.fr/entreprises/sirene/V3.11"
+INSEE_SIRENE_BASE = "https://api.insee.fr/api-sirene/3.11"
 
 logger = logging.getLogger(__name__)
 
