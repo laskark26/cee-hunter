@@ -1427,39 +1427,8 @@ elif st.session_state["current_step"] == 3:
         else:
             lots_col = "nombre_de_lots_a_usage_d_habitation"
 
-            # Pre-enrich all copros and collect distinct URBS values
-            SEUIL_URBS = 15
-            enrich_key = f"urbs_enrichi_{syndic_siret}"
-            urbs_cache = {}
-            chauffage_values = set()
-            energie_values = set()
-
-            if len(df_parc) <= SEUIL_URBS or st.session_state.get(enrich_key):
-                for idx in range(len(df_parc)):
-                    row = df_parc.iloc[idx]
-                    address = str(row.get('adresse_de_reference', '') or '').strip()
-                    _raw_immat = row.get("numero_d_immatriculation", "")
-                    numero_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and str(_raw_immat).strip() not in ("", "nan", "None") else ""
-                    data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
-                    urbs_cache[idx] = data
-                    if data:
-                        if data.get("chauffage"):
-                            chauffage_values.add(data["chauffage"])
-                        # Waterfall : chauffage individuel → pas d'énergie collective
-                        if data.get("energie") and "individuel" not in data.get("chauffage", "").lower():
-                            energie_values.add(data["energie"])
-            else:
-                st.info(f"ℹ️ {len(df_parc)} immeubles — enrichissement URBS non lancé automatiquement.")
-                if st.button(f"🔬 Enrichir les {len(df_parc)} immeubles", key="btn_urbs_enrich"):
-                    st.session_state[enrich_key] = True
-                    st.rerun()
-
-            # Filters (avant KPIs pour que les stats reflètent la sélection)
-            fc1, fc2, fc3, fc4 = st.columns(4)
-            with fc1:
-                sel_chauffage = st.multiselect("Chauffage", sorted(chauffage_values), default=[], key="filter_chauffage_parc") if chauffage_values else []
-            with fc2:
-                sel_energie = st.multiselect("Énergie", sorted(energie_values), default=[], key="filter_energie_parc") if energie_values else []
+            # ── Étape 1 : filtres indépendants de l'enrichissement URBS ──
+            fc3, fc4 = st.columns(2)
             with fc3:
                 _praw = sorted(df_parc["periode_de_construction"].dropna().unique().tolist()) if "periode_de_construction" in df_parc.columns else []
                 _popts = [PERIOD_LABELS.get(p, p) for p in _praw]
@@ -1479,15 +1448,10 @@ elif st.session_state["current_step"] == 3:
                 else:
                     lots_range_cible = (0, 9999)
 
-            # Calcul filtered_indices
-            filtered_indices = []
+            # ── Étape 2 : pré-filtrage période + lots (sans URBS) ─────────
+            pre_filtered = []
             for idx in range(len(df_parc)):
                 row = df_parc.iloc[idx]
-                data = urbs_cache.get(idx)
-                if sel_chauffage and (not data or data.get("chauffage", "") not in sel_chauffage):
-                    continue
-                if sel_energie and (not data or data.get("energie", "") not in sel_energie):
-                    continue
                 if sel_periods_cible:
                     _db_p = [_pmap[p] for p in sel_periods_cible if p in _pmap]
                     if str(row.get("periode_de_construction", "")) not in _db_p:
@@ -1496,6 +1460,53 @@ elif st.session_state["current_step"] == 3:
                     _l = int(float(row.get(lots_col, 0) or 0))
                     if not (lots_range_cible[0] <= _l <= lots_range_cible[1]):
                         continue
+                pre_filtered.append(idx)
+
+            # ── Étape 3 : enrichissement URBS sur le sous-ensemble filtré ─
+            SEUIL_URBS = 15
+            enrich_key = f"urbs_enrichi_{syndic_siret}"
+            urbs_cache = {}
+            chauffage_values = set()
+            energie_values = set()
+
+            if len(pre_filtered) <= SEUIL_URBS or st.session_state.get(enrich_key):
+                for idx in pre_filtered:
+                    row = df_parc.iloc[idx]
+                    address = str(row.get('adresse_de_reference', '') or '').strip()
+                    _raw_immat = row.get("numero_d_immatriculation", "")
+                    numero_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and str(_raw_immat).strip() not in ("", "nan", "None") else ""
+                    data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
+                    urbs_cache[idx] = data
+                    if data:
+                        if data.get("chauffage"):
+                            chauffage_values.add(data["chauffage"])
+                        if data.get("energie") and "individuel" not in data.get("chauffage", "").lower():
+                            energie_values.add(data["energie"])
+            else:
+                st.info(f"ℹ️ {len(pre_filtered)} immeubles — enrichissement URBS non lancé automatiquement.")
+                if st.button(f"🔬 Enrichir les {len(pre_filtered)} immeubles", key="btn_urbs_enrich"):
+                    st.session_state[enrich_key] = True
+                    st.rerun()
+
+            # ── Étape 4 : filtres URBS (chauffage / énergie) ─────────────
+            if chauffage_values or energie_values:
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    sel_chauffage = st.multiselect("Chauffage", sorted(chauffage_values), default=[], key="filter_chauffage_parc")
+                with fc2:
+                    sel_energie = st.multiselect("Énergie", sorted(energie_values), default=[], key="filter_energie_parc")
+            else:
+                sel_chauffage = []
+                sel_energie = []
+
+            # ── Étape 5 : filtrage final (chauffage + énergie) ───────────
+            filtered_indices = []
+            for idx in pre_filtered:
+                data = urbs_cache.get(idx)
+                if sel_chauffage and (not data or data.get("chauffage", "") not in sel_chauffage):
+                    continue
+                if sel_energie and (not data or data.get("energie", "") not in sel_energie):
+                    continue
                 filtered_indices.append(idx)
 
             # Stats depuis le résultat filtré
