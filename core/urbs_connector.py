@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime
 
 import requests
@@ -105,15 +106,30 @@ def save_urbs_to_db(numero_immat, address, imope_id, data):
 # ── API calls ─────────────────────────────────────────────────
 
 
-def urbs_geocode(address):
-    """Geocode an address via URBS and return the best IMOPE id, or None."""
+def _clean_address_for_urbs(address):
+    """Nettoie une adresse pour le géocodeur URBS (apostrophes, tirets, etc.)."""
+    if not address:
+        return address
+    # Remplacer apostrophes par espace (l'ecole → l ecole)
+    cleaned = address.replace("'", " ").replace("\u2019", " ")
+    # Normaliser les espaces multiples
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def urbs_geocode(address, lat=None, lon=None):
+    """Geocode an address via URBS and return the best IMOPE id, or None.
+    Tente /search d'abord, puis /latlon en fallback si lat/lon fournis."""
     key = _get_urbs_key()
     if not key:
         return None
+
+    # 1. Recherche par adresse nettoyée
+    cleaned = _clean_address_for_urbs(address)
     try:
         resp = requests.get(
             f"{URBS_BASE_URL}/geocoder/search",
-            params={"key": key, "value": address},
+            params={"key": key, "value": cleaned},
             timeout=10,
         )
         if resp.status_code == 200:
@@ -121,7 +137,24 @@ def urbs_geocode(address):
             if isinstance(results, list) and results:
                 return results[0].get("id")
     except Exception:
-        logger.exception("URBS geocode error")
+        logger.exception("URBS geocode /search error")
+
+    # 2. Fallback par coordonnées GPS si disponibles
+    if lat is not None and lon is not None:
+        try:
+            resp = requests.get(
+                f"{URBS_BASE_URL}/geocoder/latlon",
+                params={"key": key, "lat": lat, "lon": lon},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                results = resp.json()
+                if isinstance(results, list) and results:
+                    logger.info("URBS fallback /latlon OK pour %s", address)
+                    return results[0].get("id")
+        except Exception:
+            logger.exception("URBS geocode /latlon error")
+
     return None
 
 
@@ -168,8 +201,9 @@ def urbs_get_attributes(imope_id):
 # ── Main enrichment pipeline ─────────────────────────────────
 
 
-def urbs_enrich_address(address, numero_immat=None):
-    """Full pipeline: session cache -> BigQuery -> API. Persists to BQ."""
+def urbs_enrich_address(address, numero_immat=None, lat=None, lon=None):
+    """Full pipeline: session cache -> BigQuery -> API. Persists to BQ.
+    lat/lon optionnels pour fallback géocodage par coordonnées."""
     cache_key = f"urbs_{address}"
 
     # 1. Session cache (fastest)
@@ -183,8 +217,8 @@ def urbs_enrich_address(address, numero_immat=None):
             st.session_state[cache_key] = db_result
             return db_result
 
-    # 3. API call
-    imope_id = urbs_geocode(address)
+    # 3. API call (avec fallback lat/lon)
+    imope_id = urbs_geocode(address, lat=lat, lon=lon)
     if not imope_id:
         st.session_state[cache_key] = None
         return None

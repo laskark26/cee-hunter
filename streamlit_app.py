@@ -1475,7 +1475,9 @@ elif st.session_state["current_step"] == 3:
                     address = str(row.get('adresse_de_reference', '') or '').strip()
                     _raw_immat = row.get("numero_d_immatriculation", "")
                     numero_immat = str(_raw_immat).strip() if pd.notna(_raw_immat) and str(_raw_immat).strip() not in ("", "nan", "None") else ""
-                    data = urbs_enrich_address(address, numero_immat=numero_immat) if address else None
+                    row_lat = row.get("lat") if pd.notna(row.get("lat")) else None
+                    row_lon = row.get("long") if pd.notna(row.get("long")) else None
+                    data = urbs_enrich_address(address, numero_immat=numero_immat, lat=row_lat, lon=row_lon) if address else None
                     urbs_cache[idx] = data
                     if data:
                         if data.get("chauffage"):
