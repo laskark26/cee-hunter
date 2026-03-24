@@ -651,16 +651,18 @@ def populate_syndics_from_copro():
             return 0
 
         from datetime import datetime
-        now = datetime.utcnow().isoformat()
+        import numpy as np
+        now = pd.Timestamp.utcnow()
         df["created_at"] = now
         df["last_updated"] = now
 
-        # Colonnes SIRENE à NULL
+        # Colonnes SIRENE à NULL (typage explicite pour pyarrow)
         for col in ["denomination_officielle", "sigle", "code_ape", "libelle_ape",
                      "categorie_juridique", "tranche_effectifs", "date_creation",
                      "etat_administratif", "adresse_siege", "code_postal_siege",
-                     "commune_siege", "sirene_enriched_at"]:
-            df[col] = None
+                     "commune_siege"]:
+            df[col] = pd.array([None] * len(df), dtype=pd.StringDtype())
+        df["sirene_enriched_at"] = pd.array([pd.NaT] * len(df), dtype="datetime64[ns]")
 
         # TRUNCATE + INSERT
         client.query(f"DELETE FROM `{SYNDICS_TABLE}` WHERE TRUE").result()
