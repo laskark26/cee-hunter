@@ -1482,7 +1482,13 @@ elif st.session_state["current_step"] == 3:
                 if lots_col in df_parc.columns:
                     _lmin = int(df_parc[lots_col].min() or 0)
                     _lmax = int(df_parc[lots_col].max() or 1000)
-                    lots_range_cible = st.slider("Lots hab.", _lmin, _lmax, (_lmin, _lmax), key="filter_lots_parc") if _lmin < _lmax else (_lmin, _lmax)
+                    st.caption("Lots hab.")
+                    _ia, _ib = st.columns(2)
+                    with _ia:
+                        lots_min_cible = st.number_input("Min", min_value=0, max_value=99999, value=_lmin, step=10, key="filter_lots_min_parc", label_visibility="collapsed")
+                    with _ib:
+                        lots_max_cible = st.number_input("Max", min_value=0, max_value=99999, value=_lmax, step=10, key="filter_lots_max_parc", label_visibility="collapsed")
+                    lots_range_cible = (lots_min_cible, lots_max_cible)
                 else:
                     lots_range_cible = (0, 9999)
 
@@ -1625,13 +1631,13 @@ elif st.session_state["current_step"] == 3:
                 if lots_col in df_all.columns:
                     _lots_min = int(df_all[lots_col].min() or 0)
                     _lots_max = int(df_all[lots_col].max() or 1000)
-                    if _lots_min < _lots_max:
-                        lots_range_all = st.slider(
-                            "Lots hab.", _lots_min, _lots_max,
-                            (_lots_min, _lots_max), key="lots_filter_all",
-                        )
-                    else:
-                        lots_range_all = (_lots_min, _lots_max)
+                    st.caption("Lots hab.")
+                    _ia, _ib = st.columns(2)
+                    with _ia:
+                        lots_min_all = st.number_input("Min", min_value=0, max_value=99999, value=_lots_min, step=10, key="lots_min_filter_all", label_visibility="collapsed")
+                    with _ib:
+                        lots_max_all = st.number_input("Max", min_value=0, max_value=99999, value=_lots_max, step=10, key="lots_max_filter_all", label_visibility="collapsed")
+                    lots_range_all = (lots_min_all, lots_max_all)
                 else:
                     lots_range_all = (0, 9999)
 
