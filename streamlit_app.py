@@ -75,6 +75,7 @@ defaults = {
     # Navigation retour
     "last_search_query": "",
     "last_selected_syndic_name": None,
+    "direct_access": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -456,6 +457,7 @@ elif st.session_state["current_step"] == 1:
                     if st.button("Voir →", key=f"dr_{_row['Siret']}_{str(_row['Syndic'])[:10]}"):
                         st.session_state["selected_syndic_row"] = _row
                         st.session_state["last_selected_syndic_name"] = _row["Syndic"]
+                        st.session_state["direct_access"] = True
                         go_to_step(3)
 
     render_divider()
@@ -793,6 +795,7 @@ elif st.session_state["current_step"] == 2:
                 selected_row = df_agg.iloc[selected_index]
             st.session_state["selected_syndic_row"] = selected_row
             st.session_state["last_selected_syndic_name"] = selected_row["Syndic"]
+            st.session_state["direct_access"] = False
             go_to_step(3)
 
 
@@ -819,18 +822,22 @@ elif st.session_state["current_step"] == 3:
     pappers_info = {}
 
     filters = st.session_state.get("filters", {})
+    direct_access = st.session_state.get("direct_access", False)
     if st.session_state["current_syndic_name"] != syndic_name:
-        st.session_state["selected_syndic_data"] = fetch_data_by_syndic(
-            syndic_name,
-            filters.get("zones", ["H1"]),
-            filters.get("lots", (0, 1000))[0],
-            filters.get("lots", (0, 1000))[1],
-            periods=filters.get("periods"),
-            exclude_big_syndics=filters.get("exclude_big", True),
-            qpv_only=filters.get("qpv", False),
-            regions=filters.get("regions"),
-            departments=filters.get("departments"),
-        )
+        if direct_access:
+            st.session_state["selected_syndic_data"] = fetch_all_data_by_syndic(syndic_name)
+        else:
+            st.session_state["selected_syndic_data"] = fetch_data_by_syndic(
+                syndic_name,
+                filters.get("zones", ["H1"]),
+                filters.get("lots", (0, 1000))[0],
+                filters.get("lots", (0, 1000))[1],
+                periods=filters.get("periods"),
+                exclude_big_syndics=filters.get("exclude_big", True),
+                qpv_only=filters.get("qpv", False),
+                regions=filters.get("regions"),
+                departments=filters.get("departments"),
+            )
         st.session_state["current_syndic_name"] = syndic_name
 
     tab_intel, tab_contacts, tab_parc_cible, tab_parc_all = st.tabs([
@@ -1402,6 +1409,17 @@ elif st.session_state["current_step"] == 3:
     # ──────────────────────────────────────────────────────────
 
     with tab_parc_cible:
+        if direct_access:
+            st.markdown(
+                '<div style="padding:10px 14px;background:#FEF3C720;border-left:3px solid #D97706;'
+                'border-radius:6px;font-size:13px;color:#92400E;margin-bottom:12px;">'
+                '⚠️ Accès direct — aucun critère de prospection défini. '
+                'Les immeubles affichés sont <strong>tous les immeubles</strong> de ce syndic. '
+                '<a href="/" target="_self" style="color:#D97706;">Définir des critères en Step 1</a> pour filtrer le parc ciblé.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
         df_parc = st.session_state["selected_syndic_data"]
 
         if df_parc.empty:
