@@ -1,15 +1,14 @@
 """
 Connecteur API SIRENE INSEE — Enrichissement des données légales des syndics.
 
-Utilise l'API SIRENE V3.11 de l'INSEE avec authentification OAuth2.
+Utilise l'API SIRENE V3.11 de l'INSEE avec authentification par clé API.
 Cache-aside sur BigQuery (rnic.cache_sirene).
 """
 
-import base64
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
 import streamlit as st
@@ -18,7 +17,6 @@ from google.cloud import bigquery
 # ── Configuration ────────────────────────────────────────────
 PROJECT_ID = "gen-lang-client-0045947309"
 CACHE_TABLE = "gen-lang-client-0045947309.rnic.cache_sirene"
-INSEE_TOKEN_URL = "https://api.insee.fr/token"
 INSEE_SIRENE_BASE = "https://api.insee.fr/entreprises/sirene/V3.11"
 
 logger = logging.getLogger(__name__)
@@ -33,61 +31,9 @@ def _get_bq_client():
     return bigquery.Client(project=PROJECT_ID)
 
 
-def _get_insee_credentials():
-    """Retourne (consumer_key, consumer_secret) depuis secrets ou env."""
-    key = st.secrets.get("INSEE_CONSUMER_KEY", os.environ.get("INSEE_CONSUMER_KEY", ""))
-    secret = st.secrets.get("INSEE_CONSUMER_SECRET", os.environ.get("INSEE_CONSUMER_SECRET", ""))
-    return key, secret
-
-
-# ── OAuth2 token ─────────────────────────────────────────────
-
-def get_insee_token(force_refresh=False):
-    """
-    Obtient un access_token INSEE via OAuth2 client_credentials.
-    Met en cache dans session_state avec expiration.
-    """
-    if not force_refresh and "insee_token" in st.session_state:
-        token_data = st.session_state["insee_token"]
-        if datetime.now() < token_data["expires_at"]:
-            return token_data["access_token"]
-
-    consumer_key, consumer_secret = _get_insee_credentials()
-    if not consumer_key or not consumer_secret:
-        logger.warning("INSEE credentials manquantes")
-        return None
-
-    try:
-        credentials = base64.b64encode(
-            f"{consumer_key}:{consumer_secret}".encode()
-        ).decode()
-
-        resp = requests.post(
-            INSEE_TOKEN_URL,
-            headers={
-                "Authorization": f"Basic {credentials}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data="grant_type=client_credentials",
-            timeout=10,
-        )
-
-        if resp.status_code == 200:
-            data = resp.json()
-            expires_in = data.get("expires_in", 604800)  # défaut 7 jours
-            st.session_state["insee_token"] = {
-                "access_token": data["access_token"],
-                "expires_at": datetime.now() + timedelta(seconds=expires_in - 60),
-            }
-            logger.info("Token INSEE obtenu (expire dans %ds)", expires_in)
-            return data["access_token"]
-        else:
-            logger.error("Erreur token INSEE: %s - %s", resp.status_code, resp.text[:300])
-            return None
-
-    except Exception:
-        logger.exception("Erreur connexion token INSEE")
-        return None
+def _get_insee_api_key():
+    """Retourne la clé API INSEE depuis secrets ou env."""
+    return st.secrets.get("INSEE_API_KEY", os.environ.get("INSEE_API_KEY", ""))
 
 
 # ── BigQuery cache ───────────────────────────────────────────
@@ -176,25 +122,21 @@ def _save_to_cache(data):
 
 # ── API calls ────────────────────────────────────────────────
 
-def _make_insee_request(url, token):
-    """Requête GET authentifiée vers l'API INSEE. Gère le 401 avec token refresh."""
+def _make_insee_request(url):
+    """Requête GET authentifiée vers l'API INSEE via clé API."""
+    api_key = _get_insee_api_key()
+    if not api_key:
+        logger.warning("Clé API INSEE manquante")
+        return None
+
     resp = requests.get(
         url,
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        headers={
+            "X-INSEE-Api-Key-Integration": api_key,
+            "Accept": "application/json",
+        },
         timeout=10,
     )
-
-    # Token expiré → refresh et retry une fois
-    if resp.status_code == 401:
-        logger.info("Token INSEE expiré, renouvellement...")
-        new_token = get_insee_token(force_refresh=True)
-        if new_token:
-            resp = requests.get(
-                url,
-                headers={"Authorization": f"Bearer {new_token}", "Accept": "application/json"},
-                timeout=10,
-            )
-
     return resp
 
 
@@ -226,13 +168,11 @@ def fetch_sirene_api(siren):
     Appelle GET /siren/{siren} pour les infos de l'unité légale.
     Retourne un dict parsé ou None.
     """
-    token = get_insee_token()
-    if not token:
-        return None
-
     try:
         url = f"{INSEE_SIRENE_BASE}/siren/{siren}"
-        resp = _make_insee_request(url, token)
+        resp = _make_insee_request(url)
+        if resp is None:
+            return None
 
         if resp.status_code == 200:
             data = resp.json()
@@ -279,13 +219,11 @@ def fetch_siret_api(siret):
     Appelle GET /siret/{siret} pour l'adresse de l'établissement.
     Retourne un dict avec les champs adresse ou None.
     """
-    token = get_insee_token()
-    if not token:
-        return None
-
     try:
         url = f"{INSEE_SIRENE_BASE}/siret/{siret}"
-        resp = _make_insee_request(url, token)
+        resp = _make_insee_request(url)
+        if resp is None:
+            return None
 
         if resp.status_code == 200:
             data = resp.json()
