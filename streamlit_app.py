@@ -1468,26 +1468,43 @@ elif st.session_state["current_step"] == 3:
                 render_kpi_card("Lots moyens", lots_moy)
 
             # Filters
-            if chauffage_values or energie_values:
-                fc1, fc2 = st.columns(2)
-                with fc1:
-                    sel_chauffage = st.multiselect("Type de chauffage", sorted(chauffage_values), default=[], key="filter_chauffage_parc")
-                with fc2:
-                    sel_energie = st.multiselect("Type d'énergie", sorted(energie_values), default=[], key="filter_energie_parc")
-            else:
-                sel_chauffage = []
-                sel_energie = []
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            with fc1:
+                sel_chauffage = st.multiselect("Chauffage", sorted(chauffage_values), default=[], key="filter_chauffage_parc") if chauffage_values else []
+            with fc2:
+                sel_energie = st.multiselect("Énergie", sorted(energie_values), default=[], key="filter_energie_parc") if energie_values else []
+            with fc3:
+                _praw = sorted(df_parc["periode_de_construction"].dropna().unique().tolist()) if "periode_de_construction" in df_parc.columns else []
+                _popts = [PERIOD_LABELS.get(p, p) for p in _praw]
+                _pmap = {PERIOD_LABELS.get(p, p): p for p in _praw}
+                sel_periods_cible = st.multiselect("Période", _popts, default=[], placeholder="Toutes...", key="filter_period_parc")
+            with fc4:
+                if lots_col in df_parc.columns:
+                    _lmin = int(df_parc[lots_col].min() or 0)
+                    _lmax = int(df_parc[lots_col].max() or 1000)
+                    lots_range_cible = st.slider("Lots hab.", _lmin, _lmax, (_lmin, _lmax), key="filter_lots_parc") if _lmin < _lmax else (_lmin, _lmax)
+                else:
+                    lots_range_cible = (0, 9999)
 
             st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
 
             # Cards grid (filtered)
             filtered_indices = []
             for idx in range(len(df_parc)):
+                row = df_parc.iloc[idx]
                 data = urbs_cache.get(idx)
                 if sel_chauffage and (not data or data.get("chauffage", "") not in sel_chauffage):
                     continue
                 if sel_energie and (not data or data.get("energie", "") not in sel_energie):
                     continue
+                if sel_periods_cible:
+                    _db_p = [_pmap[p] for p in sel_periods_cible if p in _pmap]
+                    if str(row.get("periode_de_construction", "")) not in _db_p:
+                        continue
+                if lots_col in df_parc.columns:
+                    _l = int(float(row.get(lots_col, 0) or 0))
+                    if not (lots_range_cible[0] <= _l <= lots_range_cible[1]):
+                        continue
                 filtered_indices.append(idx)
 
             # ── Export CSV parc ciblé ─────────────────────────
