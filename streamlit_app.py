@@ -1454,20 +1454,7 @@ elif st.session_state["current_step"] == 3:
                     st.session_state[enrich_key] = True
                     st.rerun()
 
-            # Stats summary
-            nb_copros = len(df_parc)
-            communes_uniques = df_parc["commune"].nunique() if "commune" in df_parc.columns else 0
-            lots_moy = int(df_parc[lots_col].mean()) if lots_col in df_parc.columns else 0
-
-            s1, s2, s3 = st.columns(3)
-            with s1:
-                render_kpi_card("Bâtiments ciblés", nb_copros, primary=True)
-            with s2:
-                render_kpi_card("Communes", communes_uniques)
-            with s3:
-                render_kpi_card("Lots moyens", lots_moy)
-
-            # Filters
+            # Filters (avant KPIs pour que les stats reflètent la sélection)
             fc1, fc2, fc3, fc4 = st.columns(4)
             with fc1:
                 sel_chauffage = st.multiselect("Chauffage", sorted(chauffage_values), default=[], key="filter_chauffage_parc") if chauffage_values else []
@@ -1492,9 +1479,7 @@ elif st.session_state["current_step"] == 3:
                 else:
                     lots_range_cible = (0, 9999)
 
-            st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
-
-            # Cards grid (filtered)
+            # Calcul filtered_indices
             filtered_indices = []
             for idx in range(len(df_parc)):
                 row = df_parc.iloc[idx]
@@ -1512,6 +1497,22 @@ elif st.session_state["current_step"] == 3:
                     if not (lots_range_cible[0] <= _l <= lots_range_cible[1]):
                         continue
                 filtered_indices.append(idx)
+
+            # Stats depuis le résultat filtré
+            df_filtered = df_parc.iloc[filtered_indices]
+            nb_copros = len(filtered_indices)
+            communes_uniques = df_filtered["commune"].nunique() if "commune" in df_filtered.columns else 0
+            lots_moy = int(df_filtered[lots_col].mean()) if lots_col in df_filtered.columns and nb_copros > 0 else 0
+
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                render_kpi_card("Bâtiments ciblés", nb_copros, primary=True)
+            with s2:
+                render_kpi_card("Communes", communes_uniques)
+            with s3:
+                render_kpi_card("Lots moyens", lots_moy)
+
+            st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
 
             # ── Export CSV parc ciblé ─────────────────────────
             if filtered_indices:
